@@ -56,7 +56,7 @@
               inactive-color="#ff4949"
               :active-value="true"
               :inactive-value="false"
-              @change="toggleBookCanUpdate(book)"
+              @change="toggleBookCanUpdate(showBookInfo)"
             >
             </el-switch>
           </span>
