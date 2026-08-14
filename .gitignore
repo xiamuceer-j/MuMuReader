@@ -50,3 +50,5 @@ out
 /server/logs
 /server/storage
 /server/target
+
+/.env

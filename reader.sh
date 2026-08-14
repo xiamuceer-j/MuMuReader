@@ -103,13 +103,10 @@ install_reader() {
         echo "[]" > storage/data/default/bookSource.json
     fi
     echo -e "${green} 正在配置docker变量 ${plain}"
-    sed -i "s/\/home\/reader/${file_dir}/" docker-compose.yml
     sed -i "s/4396/${remotePort}/" docker-compose.yml
     sed -i "s/openj9-latest/${dockerImages}/" docker-compose.yml
-    # 多用户
-    sed -i "s/READER_APP_SECURE\=true/READER_APP_SECURE\=${isMultiUser}/" docker-compose.yml
-    sed -i "s/adminpwd/${adminPassword}/" docker-compose.yml
-    sed -i "s/registercode/${registerCode}/" docker-compose.yml
+    printf 'READER_APP_SECURE=%s\nREADER_APP_SECUREKEY=%s\nREADER_APP_INVITECODE=%s\n' \
+        "$isMultiUser" "$adminPassword" "$registerCode" > .env
     echo -e "${green} 准备启动 ${plain}"
     # 远程webview
     docker-compose up -d
@@ -142,7 +139,6 @@ getfileDir () {
         file_dir="/home/reader"
     fi
     orgin_file_dir=$file_dir
-    file_dir=${file_dir//\//\\\/}
 }
 
 getMultiUser () {
@@ -193,6 +189,8 @@ getRemotePort
 getMultiUser
 if [ $isMultiUser == "true" ]; then
     getPwdOrCode
+else
+    adminPassword="unused"
 fi
 getDockerImages
 install_reader
