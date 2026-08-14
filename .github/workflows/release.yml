@@ -1,4 +1,4 @@
-name: Publish Docker Multi-Platform Images
+name: Publish Docker Images
 
 on:
   # push:
@@ -10,6 +10,35 @@ jobs:
   docker:
     if: github.repository == 'xiamuceer-j/MuMuReader'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: standard
+            java-distribution: temurin
+            dockerfile: ./.github/workflows/Dockerfile
+            flavor: |
+              latest=true
+            platforms: |
+              linux/amd64
+              linux/arm64
+              linux/arm/v6
+              linux/arm/v7
+              linux/386
+              linux/ppc64le
+              linux/s390x
+          - name: openj9
+            java-distribution: adopt-openj9
+            dockerfile: ./.github/workflows/Openj9-Dockerfile
+            flavor: |
+              latest=false
+              prefix=openj9-,onlatest=true
+              suffix=
+            platforms: |
+              linux/amd64
+              linux/arm64/v8
+              linux/ppc64le
+              linux/s390x
     steps:
       -
         name: Checkout
@@ -26,7 +55,7 @@ jobs:
         name: Setup Java
         uses: actions/setup-java@v2
         with:
-          distribution: 'temurin'
+          distribution: ${{ matrix.java-distribution }}
           java-version: '8'
           cache: 'gradle'
       -
@@ -38,10 +67,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          # list of Docker images to use as base name for tags
           images: |
             mumujie/mumureader
-          # generate Docker tags based on the following events/attributes
+          flavor: ${{ matrix.flavor }}
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest,enable=${{ !contains(github.ref, 'beta') }}
@@ -62,15 +90,8 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./.github/workflows/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: |
-            linux/amd64
-            linux/arm64
-            linux/arm/v6
-            linux/arm/v7
-            linux/386
-            linux/ppc64le
-            linux/s390x
+          platforms: ${{ matrix.platforms }}
