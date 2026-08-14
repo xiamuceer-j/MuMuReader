@@ -370,23 +370,34 @@ export default {
     this.$Lazyload.$on("loaded", this.lazyloadHandler);
     this.setMobileScrollBarHidden(this.shouldHideMobileScrollBar);
   },
-  deactivated() {
-    this.saveBookProgress();
-    this.startSavePosition = false;
-    this.lastReadingBook = this.$store.getters.readingBook;
-    this.timer && clearInterval(this.timer);
-    window.removeEventListener("keydown", this.keydownHandler);
-    window.removeEventListener("scroll", this.scrollHandler);
-    this.unbindVisualViewportEvents();
-    this.unwatchFn && this.unwatchFn();
-    this.releaseWakeLockFn && this.releaseWakeLockFn();
-    this.$Lazyload.$off("loaded", this.lazyloadHandler);
-    this.setMobileScrollBarHidden(false);
-  },
-  beforeDestroy() {
-    this.unbindVisualViewportEvents();
-    this.setMobileScrollBarHidden(false);
-  },
+    deactivated() {
+      this.saveBookProgress();
+      this.startSavePosition = false;
+      this.lastReadingBook = this.$store.getters.readingBook;
+      this.timer && clearInterval(this.timer);
+      this.scrollTimer && clearTimeout(this.scrollTimer);
+      this.scrollTimer = null;
+      if (this.iosViewportChangeTimer) {
+        clearTimeout(this.iosViewportChangeTimer);
+        this.iosViewportChangeTimer = null;
+      }
+      this.isIOSViewportTransitioning = false;
+      window.removeEventListener("keydown", this.keydownHandler);
+      window.removeEventListener("scroll", this.scrollHandler);
+      this.unbindVisualViewportEvents();
+      this.unwatchFn && this.unwatchFn();
+      this.releaseWakeLockFn && this.releaseWakeLockFn();
+      this.$Lazyload.$off("loaded", this.lazyloadHandler);
+      this.setMobileScrollBarHidden(false);
+    },
+    beforeDestroy() {
+      this.unbindVisualViewportEvents();
+      if (this.iosViewportChangeTimer) {
+        clearTimeout(this.iosViewportChangeTimer);
+        this.iosViewportChangeTimer = null;
+      }
+      this.setMobileScrollBarHidden(false);
+    },
   watch: {
     chapterName(to) {
       this.title = to;
@@ -554,7 +565,8 @@ export default {
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
       showPrevChapterSize: 0,
-      lastIOSViewportChangeAt: 0,
+      isIOSViewportTransitioning: false,
+      iosViewportChangeTimer: null,
 
       speechMinutes: 0,
       speechEndTime: 0
@@ -906,7 +918,14 @@ export default {
       if (!this.isMiniIOSReader()) {
         return;
       }
-      this.lastIOSViewportChangeAt = Date.now();
+      this.isIOSViewportTransitioning = true;
+      if (this.iosViewportChangeTimer) {
+        clearTimeout(this.iosViewportChangeTimer);
+      }
+      this.iosViewportChangeTimer = setTimeout(() => {
+        this.isIOSViewportTransitioning = false;
+        this.iosViewportChangeTimer = null;
+      }, 250);
     },
     isMiniIOSReader() {
       return (
@@ -915,11 +934,7 @@ export default {
       );
     },
     shouldSkipIOSScrollCorrection() {
-      return (
-        this.isScrollRead &&
-        this.isMiniIOSReader() &&
-        Date.now() - this.lastIOSViewportChangeAt < 400
-      );
+      return this.isScrollRead && this.isMiniIOSReader() && this.isIOSViewportTransitioning;
     },
     init(refresh) {
       if (this.$store.getters.readingBook) {
@@ -2442,6 +2457,9 @@ export default {
       return null;
     },
     scrollHandler() {
+      if (this.shouldSkipIOSScrollCorrection()) {
+        return;
+      }
       const scrollTop =
         document.documentElement.scrollTop || document.body.scrollTop;
       if (!this.isSlideRead) {
@@ -2543,7 +2561,7 @@ export default {
     },
     saveReadingPosition() {
       try {
-        if (this.error || !this.startSavePosition) {
+        if (this.error || !this.startSavePosition || this.shouldSkipIOSScrollCorrection()) {
           return;
         }
         let position = 0;
@@ -3801,6 +3819,7 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
+  overflow-anchor none
 
 body.mobile-scroll-read::-webkit-scrollbar,
 html.mobile-scroll-read::-webkit-scrollbar
