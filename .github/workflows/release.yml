@@ -28,7 +28,7 @@ jobs:
               linux/ppc64le
               linux/s390x
           - name: openj9
-            java-distribution: adopt-openj9
+            java-distribution: semeru
             dockerfile: ./.github/workflows/Openj9-Dockerfile
             flavor: |
               latest=false
@@ -42,10 +42,10 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       -
         name: Setup node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: '14'
       -
@@ -53,7 +53,7 @@ jobs:
         run: cd web && npm install && npm run build
       -
         name: Setup Java
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v5
         with:
           distribution: ${{ matrix.java-distribution }}
           java-version: '8'
@@ -65,7 +65,7 @@ jobs:
       -
         name: Docker meta
         id: meta
-        uses: docker/metadata-action@v3
+        uses: docker/metadata-action@v5
         with:
           images: |
             mumujie/mumureader
@@ -75,19 +75,19 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref, 'beta') }}
       -
         name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v3
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
       -
         name: Login to DockerHub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Build and push
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
