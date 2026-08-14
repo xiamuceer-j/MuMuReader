@@ -18,6 +18,14 @@ reader:
     userBookLimit: 200
     debugLog: false
     autoClearInactiveUser: 0
+    # 封面代理相关
+    coverTimeout: 8000            # 封面下载超时时间(毫秒)
+    coverMaxSize: 10485760        # 封面最大字节数
+    coverMaxRedirect: 5           # 封面下载最大重定向次数
+    coverAllowPrivateHost: false  # 是否允许封面地址指向内网/回环地址(存在 SSRF 风险)
+    coverCacheExpireDays: 30      # 封面磁盘缓存保留天数，0 表示永不清理
+    coverCacheMaxSize: 536870912  # 封面磁盘缓存容量上限(字节)，0 表示不限制
+    coverCacheMaxAge: 86400       # 封面响应 Cache-Control max-age 秒数
 
   server:
     port: 8080

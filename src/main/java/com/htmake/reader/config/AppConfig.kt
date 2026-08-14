@@ -23,4 +23,13 @@ class AppConfig {
     var exportCharset = "UTF-8" // 导出字符集
     var exportNoChapterName = false // 不添加章节名
     var exportPictureFile = false // 导出图片
+
+    // 封面代理相关
+    var coverTimeout = 8000L        // 封面下载超时时间(毫秒)
+    var coverMaxSize = 10485760L    // 封面最大字节数，超出则拒绝缓存
+    var coverMaxRedirect = 5        // 封面下载最大重定向次数
+    var coverAllowPrivateHost = false // 是否允许封面地址指向内网/回环地址(存在 SSRF 风险)
+    var coverCacheExpireDays = 30   // 封面磁盘缓存保留天数，0 表示永不清理
+    var coverCacheMaxSize = 536870912L // 封面磁盘缓存容量上限(字节)，0 表示不限制
+    var coverCacheMaxAge = 86400L   // 封面响应 Cache-Control max-age 秒数
 }

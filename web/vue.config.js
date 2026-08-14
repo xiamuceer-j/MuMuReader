@@ -231,7 +231,12 @@ module.exports = {
                   return searchParams.get("path");
                 },
                 ({ response }) => {
-                  if (response.status === 200) {
+                  // 只缓存真正的图片响应，避免把错误页/空响应缓存 30 天
+                  const contentType = response.headers.get("Content-Type") || "";
+                  if (
+                    response.status === 200 &&
+                    contentType.indexOf("image/") === 0
+                  ) {
                     return response;
                   }
                   return null;

@@ -403,29 +403,6 @@
         </div>
         <div class="setting-wrapper">
           <div class="setting-title">
-            其它
-          </div>
-          <div class="setting-item">
-            <el-tag
-              type="info"
-              :effect="isNight ? 'dark' : 'light'"
-              class="setting-btn"
-              @click="showMPCode"
-            >
-              关注公众号【假装大佬】
-            </el-tag>
-            <el-tag
-              type="info"
-              :effect="isNight ? 'dark' : 'light'"
-              class="setting-btn"
-              @click="joinTGChannel"
-            >
-              加入TG频道【假装大佬】
-            </el-tag>
-          </div>
-        </div>
-        <div class="setting-wrapper">
-          <div class="setting-title">
             本地缓存
             <span class="right-text">{{ localCacheStats.total }}</span>
           </div>
@@ -579,10 +556,11 @@
               <el-image
                 class="cover"
                 ref="bookCoverList"
-                :src="getCover(getBookCoverUrl(book), true)"
+                :src="getCover(getBookCoverUrl(book), true, false, book)"
                 fit="cover"
                 lazy
               >
+                <img slot="error" class="cover" :src="noCoverImage()" />
               </el-image>
             </div>
             <div class="info" @click="toDetail(book)">
@@ -895,11 +873,19 @@
           <div class="book-cover">
             <el-image
               class="cover"
-              :src="getCover(getBookCoverUrl(importBookInfo), true)"
+              :src="
+                getCover(
+                  getBookCoverUrl(importBookInfo),
+                  true,
+                  false,
+                  importBookInfo
+                )
+              "
               :key="getBookCoverUrl(importBookInfo)"
               fit="cover"
               lazy
             >
+              <img slot="error" class="cover" :src="noCoverImage()" />
             </el-image>
           </div>
           <div class="book-info">
@@ -2745,12 +2731,6 @@ export default {
     showUserManageDialog() {
       eventBus.$emit("showUserManageDialog");
     },
-    showMPCode() {
-      eventBus.$emit("showMPCodeDialog");
-    },
-    joinTGChannel() {
-      window.open("https://t.me/facker_channel", "_target");
-    },
     ensureLoadBookCover() {
       // 手动触发滚动事件，显示书籍封面图片
       this.$refs.bookList.dispatchEvent(new MouseEvent("scroll"));
@@ -2796,7 +2776,7 @@ export default {
     bookCoverList() {
       return this.bookList
         .filter(v => this.getBookCoverUrl(v))
-        .map(v => this.getCover(this.getBookCoverUrl(v), true));
+        .map(v => this.getCover(this.getBookCoverUrl(v), true, false, v));
     },
     shelfBooks() {
       return this.$store.getters.shelfBooks;

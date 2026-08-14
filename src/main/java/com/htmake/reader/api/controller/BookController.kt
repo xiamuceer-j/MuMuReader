@@ -39,6 +39,7 @@ import com.htmake.reader.utils.unzip
 import com.htmake.reader.utils.zip
 import com.htmake.reader.utils.jsonEncode
 import com.htmake.reader.utils.getRelativePath
+import com.htmake.reader.utils.ImageProxy
 import com.htmake.reader.verticle.RestVerticle
 import com.htmake.reader.SpringEvent
 import org.springframework.stereotype.Component
@@ -79,6 +80,7 @@ import java.nio.file.Paths
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CoroutineScope
 import me.ag2s.epublib.domain.*
@@ -92,6 +94,10 @@ class BookController(coroutineContext: CoroutineContext): BaseController(corouti
 
     var bookInfoCache = ACache.get("bookInfoCache", 1000 * 1000 * 2L, 10000) // 缓存 2M 的书籍信息
     val concurrentLoopCount = 8
+
+    // 固定数量的分段锁既避免同一封面并发下载，也避免按 URL 保存锁导致内存增长或移除竞态
+    private val coverLocks = List(64) { Mutex() }
+    private val coverCacheWriteLock = Mutex()
 
     private var webClient: WebClient
 
@@ -176,37 +182,151 @@ class BookController(coroutineContext: CoroutineContext): BaseController(corouti
     }
 
     suspend fun getBookCover(context: RoutingContext) {
-        var coverUrl = context.queryParam("path").firstOrNull() ?: ""
-        if (coverUrl.isNullOrEmpty()) {
+        val authenticated = checkAuth(context)
+        var rawCoverUrl = context.queryParam("path").firstOrNull() ?: ""
+        if (rawCoverUrl.isNullOrEmpty()) {
             context.response().setStatusCode(404).end()
             return
         }
-        var ext = getFileExt(coverUrl, "png")
-        val md5Encode = MD5Utils.md5Encode(coverUrl).toString()
-        var cachePath = getWorkDir("storage", "cache", md5Encode + "." + ext)
-        var cacheFile = File(cachePath)
-        if (cacheFile.exists()) {
-            logger.info("send cache: {}", cacheFile)
-            context.response().putHeader("Cache-Control", "86400").sendFile(cacheFile.toString())
-            return;
+
+        // 规范化地址：只允许 http/https，protocol-relative 补全为 https
+        val coverUrl = ImageProxy.normalizeUrl(rawCoverUrl)
+        if (coverUrl == null) {
+            logger.info("invalid cover url: {}", rawCoverUrl)
+            context.response().setStatusCode(400).end()
+            return
         }
 
-        if (!cacheFile.parentFile.exists()) {
-            cacheFile.parentFile.mkdirs()
+        val bookSourceUrl = context.queryParam("bookSourceUrl").firstOrNull() ?: ""
+        val referer = context.queryParam("referer").firstOrNull()
+        val userNameSpace = getUserNameSpace(context)
+        val bookSource = if (authenticated && bookSourceUrl.isNotBlank()) {
+            getBookSourceStringBySourceURL(bookSourceUrl, userNameSpace)
+                ?.let { BookSource.fromJson(it).getOrNull() }
+        } else {
+            null
         }
 
-        launch(Dispatchers.IO) {
-            webClient.getAbs(coverUrl).timeout(3000).send {
-                var bodyBytes = it.result()?.bodyAsBuffer()?.getBytes()
-                if (bodyBytes != null) {
-                    var res = context.response().putHeader("Cache-Control", "86400")
-                    cacheFile.writeBytes(bodyBytes)
-                    res.sendFile(cacheFile.toString())
-                } else {
-                    context.response().setStatusCode(404).end()
+        // 同一 URL 在不同书源下可能使用不同鉴权信息，必须分开缓存
+        val sourceCacheKey = if (bookSource == null) "" else "$userNameSpace\n${bookSource.bookSourceUrl}"
+        val cacheKey = coverUrl + "\n" + sourceCacheKey
+        val md5Encode = MD5Utils.md5Encode(cacheKey).toString()
+        val cacheDir = File(getWorkDir("storage", "cache"))
+
+        // 命中缓存：真实扩展名在下载时才能确定，这里按已知类型逐个探测
+        findCoverCache(cacheDir, md5Encode)?.let {
+            logger.info("send cache: {}", it)
+            sendCoverFile(context, it)
+            return
+        }
+
+        if (!cacheDir.exists()) {
+            cacheDir.mkdirs()
+        }
+
+        // 同一张封面并发请求时只下载一次
+        val lock = coverLocks[(md5Encode.hashCode() and Int.MAX_VALUE) % coverLocks.size]
+        try {
+            lock.withLock {
+                findCoverCache(cacheDir, md5Encode)?.let {
+                    sendCoverFile(context, it)
+                    return
                 }
+                val result = ImageProxy.fetch(
+                    coverUrl,
+                    timeout = appConfig.coverTimeout,
+                    maxSize = appConfig.coverMaxSize,
+                    maxRedirect = appConfig.coverMaxRedirect,
+                    allowPrivate = appConfig.coverAllowPrivateHost,
+                    source = bookSource,
+                    referer = referer
+                )
+                if (appConfig.coverCacheMaxSize > 0 && result.bytes.size > appConfig.coverCacheMaxSize) {
+                    sendCoverBytes(context, result)
+                    return
+                }
+                val cacheFile = coverCacheWriteLock.withLock {
+                    ImageProxy.trimCache(
+                        cacheDir,
+                        appConfig.coverCacheMaxSize,
+                        result.bytes.size.toLong()
+                    )
+                    File(cacheDir, md5Encode + "." + result.ext).also {
+                        // 先写临时文件再改名，避免并发写坏同一个缓存文件
+                        writeCacheAtomically(it, result.bytes)
+                    }
+                }
+                sendCoverFile(context, cacheFile)
+            }
+        } catch (e: Exception) {
+            logger.warn("fetch cover failed: {} {}", coverUrl, e.message)
+            if (!context.response().ended()) {
+                context.response().setStatusCode(404).end()
             }
         }
+    }
+
+    /**
+     * 查找已缓存的封面文件
+     */
+    private fun findCoverCache(cacheDir: File, md5Encode: String): File? {
+        if (!cacheDir.exists()) {
+            return null
+        }
+        for (ext in ImageProxy.KNOWN_IMAGE_EXT) {
+            val file = File(cacheDir, "$md5Encode.$ext")
+            if (file.exists() && file.length() > 0) {
+                file.setLastModified(System.currentTimeMillis())
+                return file
+            }
+        }
+        return null
+    }
+
+    /**
+     * 先写临时文件再改名，避免并发写入产生损坏的图片
+     */
+    private fun writeCacheAtomically(cacheFile: File, bytes: ByteArray) {
+        val parent = cacheFile.parentFile
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs()
+        }
+        val tmpFile = File(parent, cacheFile.name + "." + UUID.randomUUID().toString() + ".tmp")
+        try {
+            tmpFile.writeBytes(bytes)
+            if (!tmpFile.renameTo(cacheFile)) {
+                // Windows 下目标已存在时 renameTo 会失败，回退为覆盖复制
+                tmpFile.copyTo(cacheFile, overwrite = true)
+            }
+        } finally {
+            if (tmpFile.exists()) {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    /**
+     * 输出封面文件，带正确的缓存与类型头
+     */
+    private fun sendCoverFile(context: RoutingContext, file: File) {
+        if (context.response().ended()) {
+            return
+        }
+        val ext = getFileExt(file.name, "png")
+        context.response()
+            // 之前写成 "86400" 是非法的 Cache-Control 语法，需要 max-age=
+            .putHeader("Cache-Control", "public, max-age=" + appConfig.coverCacheMaxAge)
+            .putHeader("Content-Type", ImageProxy.contentTypeOf(ext))
+            .putHeader("X-Content-Type-Options", "nosniff")
+            .sendFile(file.toString())
+    }
+
+    private fun sendCoverBytes(context: RoutingContext, result: ImageProxy.ImageResult) {
+        context.response()
+            .putHeader("Cache-Control", "no-store")
+            .putHeader("Content-Type", ImageProxy.contentTypeOf(result.ext))
+            .putHeader("X-Content-Type-Options", "nosniff")
+            .end(io.vertx.core.buffer.Buffer.buffer(result.bytes))
     }
 
     suspend fun importBookPreview(context: RoutingContext): ReturnData {

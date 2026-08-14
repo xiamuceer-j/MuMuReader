@@ -41,6 +41,7 @@ import com.htmake.reader.utils.unzip
 import com.htmake.reader.utils.zip
 import com.htmake.reader.utils.jsonEncode
 import com.htmake.reader.utils.getRelativePath
+import com.htmake.reader.utils.ImageProxy
 import com.htmake.reader.verticle.RestVerticle
 import com.htmake.reader.SpringEvent
 import org.springframework.stereotype.Component
@@ -495,6 +496,52 @@ class YueduApi : RestVerticle() {
                     }
                 }
                 logger.info("不活跃用户自动清理结束")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /**
+     * 每天清理过期的封面磁盘缓存
+     */
+    @Scheduled(cron = "0 30 3 * * ?")
+    fun clearCoverCache()
+    {
+        if (appConfig.coverCacheExpireDays <= 0 && appConfig.coverCacheMaxSize <= 0) {
+            return
+        }
+        launch(Dispatchers.IO) {
+            try {
+                val cacheDir = File(getWorkDir("storage", "cache"))
+                if (!cacheDir.exists()) {
+                    return@launch
+                }
+                logger.info("开始清理封面缓存")
+                val expireTime = if (appConfig.coverCacheExpireDays > 0) {
+                    System.currentTimeMillis() - appConfig.coverCacheExpireDays * 86400L * 1000L
+                } else {
+                    Long.MIN_VALUE
+                }
+                var deleted = 0
+                val staleTempTime = System.currentTimeMillis() - 3600L * 1000L
+                cacheDir.listFiles()?.forEach {
+                    try {
+                        // 只清理一小时前遗留的临时文件，避免误删仍在写入的文件。
+                        val isStaleTemp = it.name.endsWith(".tmp") && it.lastModified() < staleTempTime
+                        val isExpiredCover = it.extension.lowercase() in ImageProxy.KNOWN_IMAGE_EXT &&
+                            it.lastModified() < expireTime
+                        if (it.isFile() && (isExpiredCover || isStaleTemp)) {
+                            if (it.delete()) {
+                                deleted++
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                deleted += ImageProxy.trimCache(cacheDir, appConfig.coverCacheMaxSize)
+                logger.info("封面缓存清理结束，共删除 {} 个文件", deleted)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

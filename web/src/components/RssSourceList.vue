@@ -50,7 +50,9 @@
           class="rss-icon"
           fit="cover"
           lazy
-        />
+        >
+          <img slot="error" class="rss-icon" :src="noImageImage()" />
+        </el-image>
         <div class="rss-title">{{ source.sourceName }}</div>
       </div>
     </div>

@@ -42,6 +42,7 @@
               lazy
               @click.stop="noop"
             >
+              <img slot="error" class="rss-article-img" :src="noImageImage()" />
             </el-image>
           </div>
         </div>

@@ -75,7 +75,7 @@ try {
       }
     },
     methods: {
-      getImagePath(url, useSW) {
+      getImagePath(url, useSW, source) {
         if (
           url &&
           (url.startsWith("http://") ||
@@ -85,14 +85,22 @@ try {
           if (useSW && window.serviceWorkerReady) {
             return url;
           }
-          return this.api + "/cover?path=" + url;
+          // 必须编码，否则封面地址中的 & # + 等字符会破坏 query 解析
+          let coverPath = this.api + "/cover?path=" + encodeURIComponent(url);
+          if (source && source.origin) {
+            coverPath += "&bookSourceUrl=" + encodeURIComponent(source.origin);
+          }
+          if (source && source.bookUrl) {
+            coverPath += "&referer=" + encodeURIComponent(source.bookUrl);
+          }
+          return coverPath;
         }
         if (!url) return false;
         // 默认是接口服务器上的资源
         return this.$store.getters.apiRoot + url;
       },
-      getCover(coverUrl, normal, useSW) {
-        coverUrl = this.getImagePath(coverUrl, useSW);
+      getCover(coverUrl, normal, useSW, source) {
+        coverUrl = this.getImagePath(coverUrl, useSW, source);
         if (coverUrl) {
           return normal
             ? coverUrl
@@ -103,8 +111,15 @@ try {
         }
         return noCover;
       },
-      getImage(imageUrl, normal, useSW) {
-        imageUrl = this.getImagePath(imageUrl, useSW);
+      // 供 el-image 等无 vue-lazyload 兜底能力的场景使用
+      noCoverImage() {
+        return noCover;
+      },
+      noImageImage() {
+        return noImage;
+      },
+      getImage(imageUrl, normal, useSW, source) {
+        imageUrl = this.getImagePath(imageUrl, useSW, source);
         if (imageUrl) {
           return normal
             ? imageUrl

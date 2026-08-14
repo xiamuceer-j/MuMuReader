@@ -14,7 +14,14 @@
         <div class="book-cover-bg" :style="bookCoverBgStyle"></div>
         <div class="book-cover-bg-image">
           <img
-            v-lazy="getCover(getBookCoverUrl(showBookInfo))"
+            v-lazy="
+              getCover(
+                getBookCoverUrl(showBookInfo),
+                false,
+                false,
+                showBookInfo
+              )
+            "
             :key="showBookInfo.name"
             alt=""
             @click="triggerBookCoverRefClick"
@@ -104,11 +111,14 @@ export default {
   computed: {
     ...mapGetters(["dialogSmallWidth", "dialogTop"]),
     bookCoverBgStyle() {
+      // 必须加引号，编码后的地址可能含有 ( ) ' 等会破坏 url() 语法的字符
       return {
-        backgroundImage: `url(${this.getCover(
+        backgroundImage: `url("${this.getCover(
           this.getBookCoverUrl(this.showBookInfo),
-          true
-        )})`
+          true,
+          false,
+          this.showBookInfo
+        )}")`
       };
     },
     bookSourceList() {

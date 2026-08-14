@@ -291,7 +291,14 @@ export default {
             vOn:waiting={this.onWaiting}
           ></audio>
           <div class="book-cover">
-            <img v-lazy={this.getCover(this.readingBook.coverUrl)} />
+            <img
+              v-lazy={this.getCover(
+                this.readingBook.coverUrl,
+                false,
+                false,
+                this.readingBook
+              )}
+            />
           </div>
           <div class="book-progress">
             <div class="progress-tip">{this.formatTime(this.currentTime)}</div>
@@ -376,11 +383,23 @@ export default {
           <div
             class="book-info"
             style={{
-              background: this.getCover(this.readingBook.coverUrl, true)
+              backgroundImage: `url("${this.getCover(
+                this.readingBook.coverUrl,
+                true,
+                false,
+                this.readingBook
+              )}")`
             }}
           >
             <div class="book-cover">
-              <img v-lazy={this.getCover(this.readingBook.coverUrl)} />
+              <img
+                v-lazy={this.getCover(
+                  this.readingBook.coverUrl,
+                  false,
+                  false,
+                  this.readingBook
+                )}
+              />
             </div>
             <div class="book-intro">
               <div class="title">{this.title}</div>
