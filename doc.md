@@ -183,7 +183,7 @@ reader:
 
 ### Windows / MacOS / Linux
 
-从 [releases](https://github.com/hectorqin/reader/releases) 下载对应平台安装包安装即可，需要安装java8及以上环境
+从 [releases](https://github.com/xiamuceer-j/MuMuReader/releases) 下载对应平台安装包安装即可，需要安装java8及以上环境
 
 MacOS 版 `storage` 默认是 `用户目录/.reader/storage`，其它版本 `storage` 默认是 `程序目录/storage`
 
@@ -224,7 +224,7 @@ MacOS 版 `storage` 默认是 `用户目录/.reader/storage`，其它版本 `sto
 
 ### 服务器版
 
-从 [releases](https://github.com/hectorqin/reader/releases) 下载 `reader-server-$version.zip` 解压后运行即可，需要安装java8及以上环境
+从 [releases](https://github.com/xiamuceer-j/MuMuReader/releases) 下载 `reader-server-$version.zip` 解压后运行即可，需要安装java8及以上环境
 
 ```bash
 # 安装jdk10以上环境...
@@ -274,16 +274,16 @@ cd reader-server-$version
 # 使用预编译的镜像
 
 # 自用版(建议修改映射端口)
-docker run -d --restart=always --name=reader -e "SPRING_PROFILES_ACTIVE=prod" -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 hectorqin/reader
+docker run -d --restart=always --name=reader -e "SPRING_PROFILES_ACTIVE=prod" -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 mumujie/mumureader
 
 # 多用户版(建议修改映射端口)
-docker run -d --restart=always --name=reader -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 hectorqin/reader java -jar /app/bin/reader.jar --spring.profiles.active=prod --reader.app.secure=true --reader.app.secureKey=管理密码 --reader.app.inviteCode=注册邀请码
+docker run -d --restart=always --name=reader -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 mumujie/mumureader java -jar /app/bin/reader.jar --spring.profiles.active=prod --reader.app.secure=true --reader.app.secureKey=管理密码 --reader.app.inviteCode=注册邀请码
 
 # 多用户版 使用环境变量(建议修改映射端口)
-docker run -d --restart=always --name=reader -e "SPRING_PROFILES_ACTIVE=prod" -e "READER_APP_SECURE=true" -e "READER_APP_SECUREKEY=管理密码" -e "READER_APP_INVITECODE=注册邀请码" -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 hectorqin/reader
+docker run -d --restart=always --name=reader -e "SPRING_PROFILES_ACTIVE=prod" -e "READER_APP_SECURE=true" -e "READER_APP_SECUREKEY=管理密码" -e "READER_APP_INVITECODE=注册邀请码" -v $(pwd)/logs:/logs -v $(pwd)/storage:/storage -p 8080:8080 mumujie/mumureader
 
 # 更新docker镜像
-# docker pull hectorqin/reader
+# docker pull mumujie/mumureader
 
 #:后面的端口修改为映射端口
 # web端 http://localhost:8080/
@@ -313,7 +313,7 @@ curl -fsSL https://get.docker.com | bash -s docker #国外服务器
 curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun #国内服务器
 
 # 下载项目里的 docker-compose.yaml
-wget https://mirror.ghproxy.com/https://raw.githubusercontent.com/hectorqin/reader/master/docker-compose.yaml
+wget https://mirror.ghproxy.com/https://raw.githubusercontent.com/xiamuceer-j/MuMuReader/master/docker-compose.yaml
 # 根据 docker-compose.yaml 里面的注释编辑所需配置
 vim docker-compose.yaml
 # 保存
@@ -340,10 +340,10 @@ docker-compose pull && docker-compose up -d
 ```shell
 # 此脚本对甲骨文非Ubuntu系统,CentOS9可能不兼容。建议网上手动搜索
 #curl
-bash <(curl -L -s https://mirror.ghproxy.com/https://raw.githubusercontent.com/hectorqin/reader/master/reader.sh)
+bash <(curl -L -s https://mirror.ghproxy.com/https://raw.githubusercontent.com/xiamuceer-j/MuMuReader/master/reader.sh)
 
 #wget
-bash <(wget -qO- --no-check-certificate https://mirror.ghproxy.com/https://raw.githubusercontent.com/hectorqin/reader/master/reader.sh)
+bash <(wget -qO- --no-check-certificate https://mirror.ghproxy.com/https://raw.githubusercontent.com/xiamuceer-j/MuMuReader/master/reader.sh)
 
 ```
 

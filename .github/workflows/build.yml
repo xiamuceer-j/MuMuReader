@@ -5,15 +5,15 @@ on:
       - master
 jobs:
   build:
-    if: github.repository == 'hectorqin/reader'
+    if: github.repository == 'xiamuceer-j/MuMuReader'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
     - name: Publish to Registry
       uses: elgohr/Publish-Docker-Github-Action@master
       with:
-        name: hectorqin/reader-basic
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        name: mumujie/mumureader
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
         snapshot: true
         tags: "test"

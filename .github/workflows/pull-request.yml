@@ -16,7 +16,7 @@ defaults:
 
 jobs:
   docker:
-    if: github.repository == 'hectorqin/reader'
+    if: github.repository == 'xiamuceer-j/MuMuReader'
     runs-on: ubuntu-latest
     steps:
       -

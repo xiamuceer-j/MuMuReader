@@ -54,7 +54,7 @@
 
 ## 下载与安装
 
-详见[文档](https://github.com/hectorqin/reader/blob/master/doc.md)
+详见[文档](https://github.com/xiamuceer-j/MuMuReader/blob/master/doc.md)
 
 ## 问题
 
@@ -71,5 +71,5 @@
 
 ## 其它
 
-- [帮助文档](https://github.com/hectorqin/reader/blob/master/doc.md)
-- [界面预览](https://github.com/hectorqin/reader/blob/master/preview.md)
+- [帮助文档](https://github.com/xiamuceer-j/MuMuReader/blob/master/doc.md)
+- [界面预览](https://github.com/xiamuceer-j/MuMuReader/blob/master/preview.md)
