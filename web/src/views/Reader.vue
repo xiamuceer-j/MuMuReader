@@ -335,6 +335,7 @@ export default {
   activated() {
     this.init();
     window.addEventListener("keydown", this.keydownHandler);
+    this.bindVisualViewportEvents();
     if (this.title) {
       document.title =
         this.$store.getters.readingBook.name + " - " + this.title;
@@ -376,12 +377,14 @@ export default {
     this.timer && clearInterval(this.timer);
     window.removeEventListener("keydown", this.keydownHandler);
     window.removeEventListener("scroll", this.scrollHandler);
+    this.unbindVisualViewportEvents();
     this.unwatchFn && this.unwatchFn();
     this.releaseWakeLockFn && this.releaseWakeLockFn();
     this.$Lazyload.$off("loaded", this.lazyloadHandler);
     this.setMobileScrollBarHidden(false);
   },
   beforeDestroy() {
+    this.unbindVisualViewportEvents();
     this.setMobileScrollBarHidden(false);
   },
   watch: {
@@ -431,8 +434,11 @@ export default {
     },
     isScrollRead(val) {
       if (val) {
+        this.bindVisualViewportEvents();
         this.scrollStartChapterIndex = this.chapterIndex;
         this.computeShowChapterList();
+      } else {
+        this.unbindVisualViewportEvents();
       }
     },
     windowSize() {
@@ -548,10 +554,12 @@ export default {
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
       showPrevChapterSize: 0,
+      lastIOSViewportChangeAt: 0,
 
       speechMinutes: 0,
       speechEndTime: 0
     };
+
   },
   computed: {
     readingBook() {
@@ -867,6 +875,52 @@ export default {
     }
   },
   methods: {
+    bindVisualViewportEvents() {
+      if (!this.isScrollRead || !this.isMiniIOSReader() || !window.visualViewport) {
+        return;
+      }
+      this.unbindVisualViewportEvents();
+      window.visualViewport.addEventListener(
+        "resize",
+        this.handleVisualViewportChange
+      );
+      window.visualViewport.addEventListener(
+        "scroll",
+        this.handleVisualViewportChange
+      );
+    },
+    unbindVisualViewportEvents() {
+      if (!window.visualViewport) {
+        return;
+      }
+      window.visualViewport.removeEventListener(
+        "resize",
+        this.handleVisualViewportChange
+      );
+      window.visualViewport.removeEventListener(
+        "scroll",
+        this.handleVisualViewportChange
+      );
+    },
+    handleVisualViewportChange() {
+      if (!this.isMiniIOSReader()) {
+        return;
+      }
+      this.lastIOSViewportChangeAt = Date.now();
+    },
+    isMiniIOSReader() {
+      return (
+        this.$store.state.miniInterface &&
+        /iP(hone|ad|od)/.test(window.navigator.userAgent)
+      );
+    },
+    shouldSkipIOSScrollCorrection() {
+      return (
+        this.isScrollRead &&
+        this.isMiniIOSReader() &&
+        Date.now() - this.lastIOSViewportChangeAt < 400
+      );
+    },
     init(refresh) {
       if (this.$store.getters.readingBook) {
         if (
@@ -1291,11 +1345,13 @@ export default {
       ) {
         needRestore = false;
       }
-      const scrollAnchor = !reset && needRestore ? this.captureScrollAnchor() : null;
+      const scrollAnchor =
+        !reset && needRestore ? this.captureScrollAnchor() : null;
       const shouldRestoreFromCache =
         !reset &&
         needRestore &&
         !scrollAnchor &&
+        !this.shouldSkipIOSScrollCorrection() &&
         this.config.readMethod === "上下滚动2";
       this.saveReadingPosition();
       // 暂停记录位置
@@ -2299,6 +2355,7 @@ export default {
     captureScrollAnchor() {
       if (
         !this.isScrollRead ||
+        this.shouldSkipIOSScrollCorrection() ||
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
@@ -2329,6 +2386,7 @@ export default {
       if (
         !anchor ||
         !this.isScrollRead ||
+        this.shouldSkipIOSScrollCorrection() ||
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
@@ -3230,8 +3288,8 @@ export default {
       display: flex;
       flex-direction: column;
       padding-bottom: 10px;
-      padding-bottom: calc(10px + constant(safe-area-inset-top));
-      padding-bottom: calc(10px + env(safe-area-inset-top));
+      padding-bottom: calc(10px + constant(safe-area-inset-bottom));
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
       padding-left: 5px;
       padding-right: 5px;
 

@@ -296,14 +296,6 @@ export default {
       this.$store.commit("setApi", api);
     }
 
-    if (
-      window.navigator.userAgent.indexOf("iPhone") >= 0 ||
-      window.navigator.userAgent.indexOf("iPad") >= 0
-    ) {
-      document.documentElement.style.setProperty("height", "100vh");
-      document.body.style.setProperty("height", "100vh");
-    }
-
     // window.webAppDistance =
     //   window.navigator.userAgent.indexOf("iPhone") >= 0 &&
     //   window.navigator.standalone
