@@ -1563,9 +1563,23 @@ export default {
       const lastScrollTop = isAccurate
         ? 0
         : document.documentElement.scrollTop || document.body.scrollTop;
+      const setScrollTop = top => {
+        const scrollElement =
+          document.scrollingElement ||
+          document.documentElement ||
+          document.body;
+        if (scrollElement) {
+          scrollElement.scrollTop = top;
+        }
+        if (scrollElement !== document.documentElement) {
+          document.documentElement.scrollTop = top;
+        }
+        if (scrollElement !== document.body) {
+          document.body.scrollTop = top;
+        }
+      };
       const onEnd = () => {
-        document.documentElement.scrollTop = lastScrollTop + moveY;
-        document.body.scrollTop = lastScrollTop + moveY;
+        setScrollTop(lastScrollTop + moveY);
         this.transforming = false;
         // 保存进度
         setTimeout(this.saveReadingPosition, duration);
@@ -1582,8 +1596,7 @@ export default {
         duration: duration || 500,
         timing: timing,
         draw: progress => {
-          document.documentElement.scrollTop = lastScrollTop + moveY * progress;
-          document.body.scrollTop = lastScrollTop + moveY * progress;
+          setScrollTop(lastScrollTop + moveY * progress);
         },
         onEnd
       });
@@ -2345,23 +2358,13 @@ export default {
         document.documentElement.scrollTop ||
         document.body.scrollTop ||
         0;
-      const viewportHeight =
-        (window.visualViewport && window.visualViewport.height) ||
-        window.innerHeight ||
-        this.windowSize.height ||
-        0;
-      const maxScroll = Math.max(
-        0,
-        (scrollElement.scrollHeight ||
-          document.documentElement.scrollHeight ||
-          document.body.scrollHeight ||
-          0) - viewportHeight
-      );
-      const clampedTarget = Math.max(
-        0,
-        Math.min(currentScroll + rawDelta, maxScroll)
-      );
-      const adjustment = clampedTarget - currentScroll;
+      // Do not compute the upper scroll bound from visualViewport.height here.
+      // On iOS Safari/WKWebView, visualViewport.height can be a transient value
+      // while the browser chrome is animating, which may incorrectly clamp the
+      // restored anchor target and cause a visible scroll jump. Let the browser
+      // clamp the final scroll position naturally; only guard the lower bound.
+      const targetScroll = Math.max(0, currentScroll + rawDelta);
+      const adjustment = targetScroll - currentScroll;
       if (Math.abs(adjustment) > 1) {
         // Keep the paragraph the user is reading at the same viewport offset.
         this.scrollContent(adjustment, 0);

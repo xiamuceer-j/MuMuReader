@@ -263,16 +263,37 @@ export default {
       `${window.innerHeight * 0.01}px`
     );
 
+    let lastWindowWidth = window.innerWidth;
+    let lastWindowHeight = window.innerHeight;
     window.onresize = () => {
-      document.documentElement.style.setProperty(
-        "--vh",
-        `${window.innerHeight * 0.01}px`
-      );
-      this.$store.commit("setMiniInterface", isMiniInterface());
-      this.$store.commit("setWindowSize", {
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      const widthChanged = currentWidth !== lastWindowWidth;
+      const heightChanged = currentHeight !== lastWindowHeight;
+      const isiOS = /iP(hone|ad|od)/.test(window.navigator.userAgent);
+      const miniInterface = isMiniInterface();
+
+      // iOS Safari/WKWebView fires resize continuously while the address bar
+      // shows/hides. Updating --vh/windowSize for those height-only changes
+      // relayouts the reader while WebKit is also preserving scroll position,
+      // which can produce visible jumps in scroll-reading mode. Keep --vh stable
+      // unless the layout width/orientation actually changes.
+      const ignoreIOSChromeResize =
+        isiOS && miniInterface && heightChanged && !widthChanged;
+
+      if (!ignoreIOSChromeResize) {
+        document.documentElement.style.setProperty(
+          "--vh",
+          `${currentHeight * 0.01}px`
+        );
+        this.$store.commit("setWindowSize", {
+          width: currentWidth,
+          height: currentHeight
+        });
+        lastWindowWidth = currentWidth;
+        lastWindowHeight = currentHeight;
+      }
+      this.$store.commit("setMiniInterface", miniInterface);
       this.$store.commit("setTouchable", "ontouchstart" in document);
     };
 
