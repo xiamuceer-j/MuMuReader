@@ -50,8 +50,3 @@ out
 /server/logs
 /server/storage
 /server/target
-
-# Local deployment secrets and overrides
-/.deploy-secrets
-/docker-compose.override.yml
-/docker-compose.core.yml.bak-*
