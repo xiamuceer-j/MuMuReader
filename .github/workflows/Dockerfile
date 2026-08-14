@@ -1,4 +1,4 @@
-FROM openjdk:8-jdk-alpine
+FROM amazoncorretto:8-alpine-jre
 # Install base packages
 RUN \
     # apk update; \
