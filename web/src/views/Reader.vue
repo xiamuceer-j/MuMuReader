@@ -918,6 +918,9 @@ export default {
       if (!this.isMiniIOSReader()) {
         return;
       }
+      // Pause application scroll bookkeeping while Safari animates its browser
+      // chrome. The reader uses a fixed layout viewport, so the transient
+      // visual viewport must not trigger a second scroll correction.
       this.isIOSViewportTransitioning = true;
       if (this.iosViewportChangeTimer) {
         clearTimeout(this.iosViewportChangeTimer);
@@ -3819,7 +3822,6 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
-  overflow-anchor none
 
 body.mobile-scroll-read::-webkit-scrollbar,
 html.mobile-scroll-read::-webkit-scrollbar
