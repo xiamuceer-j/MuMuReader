@@ -940,46 +940,42 @@ export default {
       return this.isScrollRead && this.isMiniIOSReader() && this.isIOSViewportTransitioning;
     },
     init(refresh) {
-      if (this.$store.getters.readingBook) {
-        if (
-          refresh ||
-          !this.lastReadingBook ||
-          this.lastReadingBook.bookUrl !==
-          this.$store.getters.readingBook.bookUrl
-        ) {
-          this.title = "";
-          this.show = false;
-          this.loading = this.$loading({
-            target: this.$refs.content,
-            lock: true,
-            text: "正在获取内容",
-            spinner: "el-icon-loading",
-            background: "rgba(0,0,0,0)"
-          });
-          this.lastReadingBook = this.$store.getters.readingBook;
-          // 跳转记住的位置
-          this.autoShowPosition();
-          this.loadCatalog(false, true);
-        } else {
-          if (this.isScrollRead) {
-            this.scrollStartChapterIndex = this.chapterIndex;
-            this.showPrevChapterSize = 0;
-            this.computeShowChapterList().then(() => {
-              this.autoShowPosition(true);
-            });
-          } else if (this.isEpub) {
-            // 跳转记住的位置
-            this.autoShowPosition(true);
-          } else {
-            this.startSavePosition = true;
-          }
-          setTimeout(() => {
-            // console.log("setReadingBook", this.lastReadingBook);
-            this.$store.commit("setReadingBook", this.lastReadingBook);
-          }, 100);
-        }
-      } else {
+      const readingBook = this.$store.getters.readingBook;
+      if (!readingBook || !readingBook.bookUrl) {
         this.$message.error("请在书架选择书籍");
+        return;
+      }
+      if (
+        refresh ||
+        !this.lastReadingBook ||
+        this.lastReadingBook.bookUrl !== readingBook.bookUrl
+      ) {
+        this.title = "";
+        this.show = false;
+        this.loading = this.$loading({
+          target: this.$refs.content,
+          lock: true,
+          text: "正在获取内容",
+          spinner: "el-icon-loading",
+          background: "rgba(0,0,0,0)"
+        });
+        this.lastReadingBook = readingBook;
+        // 跳转记住的位置
+        this.autoShowPosition();
+        this.loadCatalog(false, true);
+      } else {
+        if (this.isScrollRead) {
+          this.scrollStartChapterIndex = this.chapterIndex;
+          this.showPrevChapterSize = 0;
+          this.computeShowChapterList().then(() => {
+            this.autoShowPosition(true);
+          });
+        } else if (this.isEpub) {
+          // 跳转记住的位置
+          this.autoShowPosition(true);
+        } else {
+          this.startSavePosition = true;
+        }
       }
     },
     changeBook(book) {
@@ -997,6 +993,10 @@ export default {
       this.loadCatalog(true, true);
     },
     loadCatalog(refresh, init) {
+      const readingBook = this.$store.getters.readingBook;
+      if (!readingBook || !readingBook.bookUrl) {
+        return Promise.resolve();
+      }
       if (!this.api) {
         setTimeout(() => {
           if (this.loadCatalog) {
@@ -1034,21 +1034,25 @@ export default {
       );
     },
     getCatalog(refresh) {
+      const readingBook = this.$store.getters.readingBook;
+      if (!readingBook || !readingBook.bookUrl) {
+        return Promise.reject(new Error("书籍链接为空"));
+      }
       const params = {
-        url: this.$store.getters.readingBook.bookUrl,
+        url: readingBook.bookUrl,
         refresh: refresh ? 1 : 0
       };
       if (this.$route.query.search) {
         // 来自搜索结果，请求需要带上 书源链接
-        params.bookSourceUrl = this.$store.getters.readingBook.origin;
+        params.bookSourceUrl = readingBook.origin;
       }
       return networkFirstRequest(
         () => Axios.post(this.api + "/getChapterList", params),
-        this.$store.getters.readingBook.name +
+        readingBook.name +
         "_" +
-        this.$store.getters.readingBook.author +
+        readingBook.author +
         "@" +
-        this.$store.getters.readingBook.bookUrl +
+        readingBook.bookUrl +
         "@chapterList"
       );
     },

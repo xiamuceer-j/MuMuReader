@@ -455,7 +455,9 @@ class BookController(coroutineContext: CoroutineContext): BaseController(corouti
         var refresh: Int = 0
         if (context.request().method() == HttpMethod.POST) {
             // post 请求
-            bookUrl = context.bodyAsJson.getString("url") ?: context.bodyAsJson.getJsonObject("book").getString("bookUrl") ?: ""
+            val body = context.bodyAsJson
+            val book = body.getJsonObject("book")
+            bookUrl = body.getString("url") ?: book?.getString("bookUrl") ?: ""
             refresh = context.bodyAsJson.getInteger("refresh", 0)
         } else {
             // get 请求
