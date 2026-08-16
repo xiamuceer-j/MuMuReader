@@ -66,7 +66,8 @@ export default new Vuex.Store({
     customConfigList: [].concat(settings.customConfigList),
     showBookInfo: {},
     cachingBookList: [],
-    bookmarks: []
+    bookmarks: [],
+    readingRecentReady: false
   },
   mutations: {
     setShelfBooks(state, books) {
@@ -172,6 +173,9 @@ export default new Vuex.Store({
         JSON.stringify(info)
       );
     },
+    clearReadingBook(state) {
+      state.readingBook = {};
+    },
     setConfig(state, config) {
       delete config.name;
       delete config.configDefaultType;
@@ -234,6 +238,9 @@ export default new Vuex.Store({
     },
     setLoginAuth(state, loginAuth) {
       state.loginAuth = loginAuth;
+    },
+    setReadingRecentReady(state, ready) {
+      state.readingRecentReady = ready;
     },
     setToken(state, token) {
       state.token = token;

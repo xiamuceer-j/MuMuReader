@@ -208,7 +208,11 @@ export default {
           {this.showChapterList.map(chapter => {
             if (chapter.isVolume) {
               return (
-                <div key={chapter.index} class="content-body chapter-content reading-chapter volume-chapter">
+                <div
+                  key={chapter.index}
+                  class="content-body chapter-content reading-chapter volume-chapter"
+                  data-index={chapter.index}
+                >
                   <div class="volume-content">
                     <h3 data-pos={0}>{chapter.title}</h3>
                     <p class="volume-tag">{chapter.content}</p>

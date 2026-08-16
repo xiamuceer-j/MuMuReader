@@ -399,6 +399,11 @@ export default {
       this.setMobileScrollBarHidden(false);
     },
   watch: {
+    readingRecentReady(ready) {
+      if (ready) {
+        this.init(true);
+      }
+    },
     chapterName(to) {
       this.title = to;
     },
@@ -475,7 +480,7 @@ export default {
       }
     },
     readingBook(val, oldVal) {
-      if (val.bookUrl !== oldVal.bookUrl) {
+      if (this.readingRecentReady && val.bookUrl !== oldVal.bookUrl) {
         this.startSavePosition = false;
         this.autoShowPosition();
       }
@@ -576,6 +581,9 @@ export default {
   computed: {
     readingBook() {
       return this.$store.getters.readingBook || {};
+    },
+    readingRecentReady() {
+      return this.$store.state.readingRecentReady;
     },
     catalog() {
       return (this.$store.getters.readingBook || {}).catalog || [];
@@ -928,18 +936,29 @@ export default {
       this.iosViewportChangeTimer = setTimeout(() => {
         this.isIOSViewportTransitioning = false;
         this.iosViewportChangeTimer = null;
+        this.lastScrollTop = this.getScrollTop();
+        this.saveReadingPosition();
       }, 250);
     },
     isMiniIOSReader() {
+      const navigator = window.navigator;
       return (
         this.$store.state.miniInterface &&
-        /iP(hone|ad|od)/.test(window.navigator.userAgent)
+        (/iP(hone|ad|od)/.test(navigator.userAgent) ||
+          (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
       );
     },
     shouldSkipIOSScrollCorrection() {
-      return this.isScrollRead && this.isMiniIOSReader() && this.isIOSViewportTransitioning;
+      return (
+        this.isScrollRead &&
+        this.isMiniIOSReader() &&
+        this.isIOSViewportTransitioning
+      );
     },
     init(refresh) {
+      if (!this.readingRecentReady) {
+        return;
+      }
       const readingBook = this.$store.getters.readingBook;
       if (!readingBook || !readingBook.bookUrl) {
         this.$message.error("请在书架选择书籍");
@@ -1381,18 +1400,25 @@ export default {
       // 记录当前章节
       this.showChapterList = list;
       this.$nextTick(() => {
-        this.restoreScrollAnchor(scrollAnchor);
-        this.computePages(() => {
-          if (reset) {
-            // 切换上下章节，滚动到顶部
-            this.toTop(0);
-            this.startSavePosition = true;
-          } else if (shouldRestoreFromCache) {
-            this.autoShowPosition(true);
-          } else {
-            this.startSavePosition = true;
-          }
-        });
+        const afterLayout = () => {
+          this.restoreScrollAnchor(scrollAnchor);
+          this.computePages(() => {
+            if (reset) {
+              // 切换上下章节，滚动到顶部
+              this.toTop(0);
+              this.startSavePosition = true;
+            } else if (shouldRestoreFromCache) {
+              this.autoShowPosition(true);
+            } else {
+              this.startSavePosition = true;
+            }
+          });
+        };
+        if (window.requestAnimationFrame) {
+          window.requestAnimationFrame(afterLayout);
+        } else {
+          afterLayout();
+        }
       });
     },
     saveBookProgress(index) {
@@ -1638,9 +1664,7 @@ export default {
     },
     scrollContent(moveY, duration, isAccurate) {
       // console.log("scrollContent", moveY);
-      const lastScrollTop = isAccurate
-        ? 0
-        : document.documentElement.scrollTop || document.body.scrollTop;
+      const lastScrollTop = isAccurate ? 0 : this.getScrollTop();
       const setScrollTop = top => {
         const scrollElement =
           document.scrollingElement ||
@@ -2377,7 +2401,6 @@ export default {
     captureScrollAnchor() {
       if (
         !this.isScrollRead ||
-        this.shouldSkipIOSScrollCorrection() ||
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
@@ -2401,14 +2424,25 @@ export default {
       return {
         chapterIndex: +chapter.dataset.index,
         paragraphPos: +paragraph.dataset.pos,
-        offsetTop: paragraph.getBoundingClientRect().top
+        offsetTop: this.getScrollAnchorTop(paragraph)
       };
+    },
+    getScrollAnchorTop(element) {
+      const top = element.getBoundingClientRect().top;
+      if (this.isMiniIOSReader() && window.visualViewport) {
+        return top - window.visualViewport.offsetTop;
+      }
+      return top;
+    },
+    getScrollTop() {
+      const scrollElement =
+        document.scrollingElement || document.documentElement || document.body;
+      return scrollElement ? scrollElement.scrollTop : 0;
     },
     restoreScrollAnchor(anchor) {
       if (
         !anchor ||
         !this.isScrollRead ||
-        this.shouldSkipIOSScrollCorrection() ||
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
@@ -2427,17 +2461,13 @@ export default {
       if (!paragraph) {
         return;
       }
-      const newTop = paragraph.getBoundingClientRect().top;
+      const newTop = this.getScrollAnchorTop(paragraph);
       const rawDelta = newTop - anchor.offsetTop;
       const scrollElement =
         document.scrollingElement ||
         document.documentElement ||
         document.body;
-      const currentScroll =
-        scrollElement.scrollTop ||
-        document.documentElement.scrollTop ||
-        document.body.scrollTop ||
-        0;
+      const currentScroll = scrollElement.scrollTop || 0;
       // Do not compute the upper scroll bound from visualViewport.height here.
       // On iOS Safari/WKWebView, visualViewport.height can be a transient value
       // while the browser chrome is animating, which may incorrectly clamp the
@@ -2467,8 +2497,7 @@ export default {
       if (this.shouldSkipIOSScrollCorrection()) {
         return;
       }
-      const scrollTop =
-        document.documentElement.scrollTop || document.body.scrollTop;
+      const scrollTop = this.getScrollTop();
       if (!this.isSlideRead) {
         this.currentPage = Math.round(
           (scrollTop + this.windowSize.height) /
@@ -3826,6 +3855,10 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
+  overflow-anchor none
+
+body.mobile-scroll-read .book-content
+  overflow-anchor none
 
 body.mobile-scroll-read::-webkit-scrollbar,
 html.mobile-scroll-read::-webkit-scrollbar

@@ -264,7 +264,10 @@ export default {
       const currentHeight = window.innerHeight;
       const widthChanged = currentWidth !== lastWindowWidth;
       const heightChanged = currentHeight !== lastWindowHeight;
-      const isiOS = /iP(hone|ad|od)/.test(window.navigator.userAgent);
+      const navigator = window.navigator;
+      const isiOS =
+        /iP(hone|ad|od)/.test(navigator.userAgent) ||
+        (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
       const miniInterface = isMiniInterface();
 
       // iOS Safari/WKWebView fires resize continuously while the address bar
@@ -327,7 +330,9 @@ export default {
     this.autoSetTheme(this.autoTheme);
 
     this.getUserInfo().then(() => {
+      this.$store.commit("clearReadingBook");
       this.$store.dispatch("syncFromLocalStorage");
+      this.$store.commit("setReadingRecentReady", true);
       this.init();
     });
     this.loadTxtTocRules();
@@ -531,6 +536,7 @@ export default {
         isLogin: this.isLogin
       });
       if (res.data.isSuccess) {
+        this.$store.commit("setReadingRecentReady", false);
         this.$store.commit("setShowLogin", false);
         this.$nextTick(() => {
           this.$store.commit("setLoginAuth", true);
@@ -539,7 +545,9 @@ export default {
           this.$store.commit("setToken", res.data.data.accessToken);
         }
         this.getUserInfo().then(() => {
+          this.$store.commit("clearReadingBook");
           this.$store.dispatch("syncFromLocalStorage");
+          this.$store.commit("setReadingRecentReady", true);
           this.init(true);
         });
       }
