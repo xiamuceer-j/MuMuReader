@@ -335,7 +335,6 @@ export default {
   activated() {
     this.init();
     window.addEventListener("keydown", this.keydownHandler);
-    this.bindVisualViewportEvents();
     if (this.title) {
       document.title =
         this.$store.getters.readingBook.name + " - " + this.title;
@@ -377,25 +376,14 @@ export default {
       this.timer && clearInterval(this.timer);
       this.scrollTimer && clearTimeout(this.scrollTimer);
       this.scrollTimer = null;
-      if (this.iosViewportChangeTimer) {
-        clearTimeout(this.iosViewportChangeTimer);
-        this.iosViewportChangeTimer = null;
-      }
-      this.isIOSViewportTransitioning = false;
       window.removeEventListener("keydown", this.keydownHandler);
       window.removeEventListener("scroll", this.scrollHandler);
-      this.unbindVisualViewportEvents();
       this.unwatchFn && this.unwatchFn();
       this.releaseWakeLockFn && this.releaseWakeLockFn();
       this.$Lazyload.$off("loaded", this.lazyloadHandler);
       this.setMobileScrollBarHidden(false);
     },
     beforeDestroy() {
-      this.unbindVisualViewportEvents();
-      if (this.iosViewportChangeTimer) {
-        clearTimeout(this.iosViewportChangeTimer);
-        this.iosViewportChangeTimer = null;
-      }
       this.setMobileScrollBarHidden(false);
     },
   watch: {
@@ -450,11 +438,8 @@ export default {
     },
     isScrollRead(val) {
       if (val) {
-        this.bindVisualViewportEvents();
         this.scrollStartChapterIndex = this.chapterIndex;
         this.computeShowChapterList();
-      } else {
-        this.unbindVisualViewportEvents();
       }
     },
     windowSize() {
@@ -570,8 +555,6 @@ export default {
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
       showPrevChapterSize: 0,
-      isIOSViewportTransitioning: false,
-      iosViewportChangeTimer: null,
 
       speechMinutes: 0,
       speechEndTime: 0
@@ -895,64 +878,12 @@ export default {
     }
   },
   methods: {
-    bindVisualViewportEvents() {
-      if (!this.isScrollRead || !this.isMiniIOSReader() || !window.visualViewport) {
-        return;
-      }
-      this.unbindVisualViewportEvents();
-      window.visualViewport.addEventListener(
-        "resize",
-        this.handleVisualViewportChange
-      );
-      window.visualViewport.addEventListener(
-        "scroll",
-        this.handleVisualViewportChange
-      );
-    },
-    unbindVisualViewportEvents() {
-      if (!window.visualViewport) {
-        return;
-      }
-      window.visualViewport.removeEventListener(
-        "resize",
-        this.handleVisualViewportChange
-      );
-      window.visualViewport.removeEventListener(
-        "scroll",
-        this.handleVisualViewportChange
-      );
-    },
-    handleVisualViewportChange() {
-      if (!this.isMiniIOSReader()) {
-        return;
-      }
-      // Pause application scroll bookkeeping while Safari animates its browser
-      // chrome. The reader uses a fixed layout viewport, so the transient
-      // visual viewport must not trigger a second scroll correction.
-      this.isIOSViewportTransitioning = true;
-      if (this.iosViewportChangeTimer) {
-        clearTimeout(this.iosViewportChangeTimer);
-      }
-      this.iosViewportChangeTimer = setTimeout(() => {
-        this.isIOSViewportTransitioning = false;
-        this.iosViewportChangeTimer = null;
-        this.lastScrollTop = this.getScrollTop();
-        this.saveReadingPosition();
-      }, 250);
-    },
     isMiniIOSReader() {
       const navigator = window.navigator;
       return (
         this.$store.state.miniInterface &&
         (/iP(hone|ad|od)/.test(navigator.userAgent) ||
           (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
-      );
-    },
-    shouldSkipIOSScrollCorrection() {
-      return (
-        this.isScrollRead &&
-        this.isMiniIOSReader() &&
-        this.isIOSViewportTransitioning
       );
     },
     init(refresh) {
@@ -1355,6 +1286,9 @@ export default {
       }
       if (this.config.readMethod === "上下滚动2") {
         startIndex = this.chapterIndex - this.showPrevChapterSize;
+        if (!reset && this.isMiniIOSReader() && this.showChapterList.length) {
+          startIndex = Math.min(startIndex, this.showChapterList[0].index);
+        }
       }
       const waitPromise = [];
       for (
@@ -1392,7 +1326,6 @@ export default {
         !reset &&
         needRestore &&
         !scrollAnchor &&
-        !this.shouldSkipIOSScrollCorrection() &&
         this.config.readMethod === "上下滚动2";
       this.saveReadingPosition();
       // 暂停记录位置
@@ -1435,10 +1368,7 @@ export default {
     },
     toTop(interval) {
       if (this.$store.state.miniInterface) {
-        this.scrollContent(
-          -(document.documentElement.scrollTop || document.body.scrollTop),
-          interval
-        );
+        this.scrollContent(-this.getScrollTop(), interval);
       } else {
         jump(this.$refs.top, { duration: interval });
       }
@@ -1672,12 +1602,6 @@ export default {
           document.body;
         if (scrollElement) {
           scrollElement.scrollTop = top;
-        }
-        if (scrollElement !== document.documentElement) {
-          document.documentElement.scrollTop = top;
-        }
-        if (scrollElement !== document.body) {
-          document.body.scrollTop = top;
         }
       };
       const onEnd = () => {
@@ -2424,15 +2348,11 @@ export default {
       return {
         chapterIndex: +chapter.dataset.index,
         paragraphPos: +paragraph.dataset.pos,
-        offsetTop: this.getScrollAnchorTop(paragraph)
+        documentTop: this.getScrollAnchorDocumentTop(paragraph)
       };
     },
-    getScrollAnchorTop(element) {
-      const top = element.getBoundingClientRect().top;
-      if (this.isMiniIOSReader() && window.visualViewport) {
-        return top - window.visualViewport.offsetTop;
-      }
-      return top;
+    getScrollAnchorDocumentTop(element) {
+      return element.getBoundingClientRect().top + this.getScrollTop();
     },
     getScrollTop() {
       const scrollElement =
@@ -2461,18 +2381,14 @@ export default {
       if (!paragraph) {
         return;
       }
-      const newTop = this.getScrollAnchorTop(paragraph);
-      const rawDelta = newTop - anchor.offsetTop;
+      const newDocumentTop = this.getScrollAnchorDocumentTop(paragraph);
+      const rawDelta = newDocumentTop - anchor.documentTop;
       const scrollElement =
         document.scrollingElement ||
         document.documentElement ||
         document.body;
       const currentScroll = scrollElement.scrollTop || 0;
-      // Do not compute the upper scroll bound from visualViewport.height here.
-      // On iOS Safari/WKWebView, visualViewport.height can be a transient value
-      // while the browser chrome is animating, which may incorrectly clamp the
-      // restored anchor target and cause a visible scroll jump. Let the browser
-      // clamp the final scroll position naturally; only guard the lower bound.
+      // Let the browser clamp the upper bound; only guard the lower bound.
       const targetScroll = Math.max(0, currentScroll + rawDelta);
       const adjustment = targetScroll - currentScroll;
       if (Math.abs(adjustment) > 1) {
@@ -2494,9 +2410,6 @@ export default {
       return null;
     },
     scrollHandler() {
-      if (this.shouldSkipIOSScrollCorrection()) {
-        return;
-      }
       const scrollTop = this.getScrollTop();
       if (!this.isSlideRead) {
         this.currentPage = Math.round(
@@ -2522,7 +2435,8 @@ export default {
           // }
         } else if (
           scrollTop >
-          document.documentElement.scrollHeight - 4 * this.windowSize.height // 倒数第四页
+          (document.scrollingElement || document.documentElement).scrollHeight -
+          4 * this.windowSize.height // 倒数第四页
         ) {
           // 往下滚动到 倒数第三页
           if (!this.preCaching && this.startSavePosition) {
@@ -2597,7 +2511,7 @@ export default {
     },
     saveReadingPosition() {
       try {
-        if (this.error || !this.startSavePosition || this.shouldSkipIOSScrollCorrection()) {
+        if (this.error || !this.startSavePosition) {
           return;
         }
         let position = 0;
