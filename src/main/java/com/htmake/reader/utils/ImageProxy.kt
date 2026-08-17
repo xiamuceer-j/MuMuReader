@@ -10,13 +10,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.ConnectionSpec
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.io.InterruptedIOException
 import java.io.IOException
 import java.io.InputStream
 import java.io.File
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
-import java.net.InterruptedIOException
 import java.net.URL
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
