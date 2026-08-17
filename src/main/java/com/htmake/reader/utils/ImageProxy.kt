@@ -16,8 +16,10 @@ import java.io.File
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.InterruptedIOException
 import java.net.URL
 import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -64,10 +66,39 @@ object ImageProxy {
 
     class ImageResult(val bytes: ByteArray, val ext: String, val contentType: String)
 
+    private class UpstreamResult(
+        val code: Int,
+        val location: String? = null,
+        val bytes: ByteArray? = null,
+        val contentType: String = ""
+    )
+
     /**
      * 继承 IOException，以便从 Dns.lookup / okhttp 调用栈中正常抛出
      */
-    class ImageFetchException(message: String, cause: Throwable? = null) : IOException(message, cause)
+    class ImageFetchException(
+        message: String,
+        cause: Throwable? = null,
+        val upstreamStatus: Int? = null
+    ) : IOException(message, cause) {
+        fun responseStatus(): Int {
+            if (upstreamStatus != null && upstreamStatus in 400..499) {
+                return upstreamStatus
+            }
+            return if (hasCause<InterruptedIOException>()) 504 else 502
+        }
+
+        private inline fun <reified T : Throwable> hasCause(): Boolean {
+            var current: Throwable? = this
+            while (current != null) {
+                if (current is T) {
+                    return true
+                }
+                current = current.cause
+            }
+            return false
+        }
+    }
 
     /**
      * 规范化图片地址
@@ -264,67 +295,98 @@ object ImageProxy {
             }
             val request = requestBuilder.get().build()
 
-            val response = try {
-                client.newCall(request).execute()
+            val upstream = executeWithRetry(client, request, currentUrl, maxSize)
+            if (upstream.code in 300..399) {
+                val location = upstream.location
+                    ?: throw ImageFetchException("重定向缺少 Location: $currentUrl")
+                if (redirectCount >= maxRedirect) {
+                    throw ImageFetchException("重定向次数过多: $rawUrl")
+                }
+                redirectCount++
+                val next = try {
+                    URL(URL(currentUrl), location).toString()
+                } catch (e: Exception) {
+                    throw ImageFetchException("非法的重定向地址: $location", e)
+                }
+                currentUrl = normalizeUrl(next)
+                    ?: throw ImageFetchException("非法的重定向地址: $location")
+                continue
+            }
+
+            val bytes = upstream.bytes ?: throw ImageFetchException("图片内容为空")
+            // 优先按文件头判断类型，其次才信任 Content-Type
+            val sniffedExt = sniffExt(bytes)
+            val declaredExt = CONTENT_TYPE_EXT[upstream.contentType]
+            val ext = sniffedExt ?: declaredExt
+                ?: throw ImageFetchException("返回内容不是图片: contentType=${upstream.contentType}")
+
+            return ImageResult(bytes, ext, upstream.contentType)
+        }
+    }
+
+    /**
+     * 上游偶发重置连接时重试一次。只重试传输层 IOException，HTTP 状态码和内容校验错误不重试。
+     */
+    private fun executeWithRetry(
+        client: OkHttpClient,
+        request: Request,
+        currentUrl: String,
+        maxSize: Long
+    ): UpstreamResult {
+        var lastError: IOException? = null
+        for (attempt in 0..1) {
+            try {
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    if (code in 300..399) {
+                        return UpstreamResult(code, location = response.header("Location"))
+                    }
+                    if (!response.isSuccessful) {
+                        throw ImageFetchException(
+                            "图片下载失败，状态码: $code, 地址: $currentUrl",
+                            upstreamStatus = code
+                        )
+                    }
+
+                    val contentType = (response.header("Content-Type") ?: "")
+                        .substringBefore(";")
+                        .trim()
+                        .lowercase()
+                    val declaredLength = response.header("Content-Length")?.toLongOrNull()
+                    if (declaredLength != null && declaredLength > maxSize) {
+                        throw ImageFetchException("图片体积过大: $declaredLength > $maxSize")
+                    }
+
+                    val body = response.body ?: throw ImageFetchException("图片内容为空")
+                    val bytes = readAtMost(body.byteStream(), maxSize)
+                    if (bytes.isEmpty()) {
+                        throw ImageFetchException("图片内容为空")
+                    }
+                    return UpstreamResult(code, bytes = bytes, contentType = contentType)
+                }
             } catch (e: ImageFetchException) {
                 throw e
             } catch (e: IOException) {
-                // OkHttp 会把 Dns 抛出的异常包装成 UnknownHostException
+                // OkHttp 会把 Dns 抛出的异常包装成 UnknownHostException。
                 val cause = e.cause
                 if (cause is ImageFetchException) {
                     throw cause
                 }
-                throw ImageFetchException("图片下载失败: ${e.message}", e)
-            }
-
-            response.use {
-                val code = it.code
-                if (code in 300..399) {
-                    val location = it.header("Location")
-                        ?: throw ImageFetchException("重定向缺少 Location: $currentUrl")
-                    if (redirectCount >= maxRedirect) {
-                        throw ImageFetchException("重定向次数过多: $rawUrl")
-                    }
-                    redirectCount++
-                    val next = try {
-                        URL(URL(currentUrl), location).toString()
-                    } catch (e: Exception) {
-                        throw ImageFetchException("非法的重定向地址: $location", e)
-                    }
-                    currentUrl = normalizeUrl(next)
-                        ?: throw ImageFetchException("非法的重定向地址: $location")
-                    return@use
+                lastError = e
+                if (attempt == 0 && isRetryableTransportFailure(e)) {
+                    Thread.sleep(100)
+                } else {
+                    break
                 }
-
-                if (!it.isSuccessful) {
-                    throw ImageFetchException("图片下载失败，状态码: $code")
-                }
-
-                val contentType = (it.header("Content-Type") ?: "")
-                    .substringBefore(";")
-                    .trim()
-                    .lowercase()
-
-                val declaredLength = it.header("Content-Length")?.toLongOrNull()
-                if (declaredLength != null && declaredLength > maxSize) {
-                    throw ImageFetchException("图片体积过大: $declaredLength > $maxSize")
-                }
-
-                val body = it.body ?: throw ImageFetchException("图片内容为空")
-                val bytes = readAtMost(body.byteStream(), maxSize)
-                if (bytes.isEmpty()) {
-                    throw ImageFetchException("图片内容为空")
-                }
-
-                // 优先按文件头判断类型，其次才信任 Content-Type
-                val sniffedExt = sniffExt(bytes)
-                val declaredExt = CONTENT_TYPE_EXT[contentType]
-                val ext = sniffedExt ?: declaredExt
-                    ?: throw ImageFetchException("返回内容不是图片: contentType=$contentType")
-
-                return ImageResult(bytes, ext, contentType)
             }
         }
+        throw ImageFetchException("图片下载失败: ${lastError?.message}, 地址: $currentUrl", lastError)
+    }
+
+    private fun isRetryableTransportFailure(error: IOException): Boolean {
+        return error !is InterruptedIOException &&
+            error !is UnknownHostException &&
+            error !is SSLException
     }
 
     private fun mergeCookie(cookie: String, customCookie: String?): String {

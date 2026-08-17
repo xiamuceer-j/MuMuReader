@@ -258,10 +258,24 @@ class BookController(coroutineContext: CoroutineContext): BaseController(corouti
                 }
                 sendCoverFile(context, cacheFile)
             }
-        } catch (e: Exception) {
-            logger.warn("fetch cover failed: {} {}", coverUrl, e.message)
+        } catch (e: ImageProxy.ImageFetchException) {
+            logger.warn(e) {
+                "fetch cover failed: url=$coverUrl source=$bookSourceUrl referer=${referer ?: ""} " +
+                    "upstreamStatus=${e.upstreamStatus} responseStatus=${e.responseStatus()} message=${e.message}"
+            }
             if (!context.response().ended()) {
-                context.response().setStatusCode(404).end()
+                context.response()
+                    .putHeader("Cache-Control", "no-store")
+                    .setStatusCode(e.responseStatus())
+                    .end()
+            }
+        } catch (e: Exception) {
+            logger.warn(e) { "fetch cover failed unexpectedly: url=$coverUrl" }
+            if (!context.response().ended()) {
+                context.response()
+                    .putHeader("Cache-Control", "no-store")
+                    .setStatusCode(502)
+                    .end()
             }
         }
     }

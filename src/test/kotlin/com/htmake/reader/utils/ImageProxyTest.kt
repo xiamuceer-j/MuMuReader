@@ -9,6 +9,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.net.InetAddress
+import java.net.SocketTimeoutException
 
 class ImageProxyTest {
 
@@ -37,6 +38,13 @@ class ImageProxyTest {
         )
         assertEquals("png", ImageProxy.sniffExt(png))
         assertNull(ImageProxy.sniffExt("<html></html>".toByteArray()))
+    }
+
+    @Test
+    fun `maps upstream failures to meaningful proxy response statuses`() {
+        assertEquals(404, ImageProxy.ImageFetchException("not found", upstreamStatus = 404).responseStatus())
+        assertEquals(403, ImageProxy.ImageFetchException("forbidden", upstreamStatus = 403).responseStatus())
+        assertEquals(504, ImageProxy.ImageFetchException("timed out", SocketTimeoutException()).responseStatus())
     }
 
     @Test

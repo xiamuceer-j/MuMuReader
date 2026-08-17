@@ -227,8 +227,11 @@ module.exports = {
             plugins: [
               customWorkboxPlugin(
                 ({ request }) => {
-                  const searchParams = new URL(request.url).searchParams;
-                  return searchParams.get("path");
+                  const cacheUrl = new URL(request.url);
+                  // 同一图片地址在不同书源下可能需要不同 Cookie、请求头或 Referer。
+                  // accessToken 不参与键，避免令牌轮换造成无效缓存副本。
+                  cacheUrl.searchParams.delete("accessToken");
+                  return cacheUrl.href;
                 },
                 ({ response }) => {
                   // 只缓存真正的图片响应，避免把错误页/空响应缓存 30 天
