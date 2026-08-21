@@ -19,6 +19,16 @@ const getCurrentUserName = state => {
     : (state.userInfo || {}).username || "default";
 };
 
+// "上下滚动2" 曾是实验性的滚动模式。保留兼容迁移，避免旧用户配置
+// 在升级后落入一个已经不存在的设置项。
+const normalizeReadMethod = config => {
+  const normalized = { ...config };
+  if (normalized.readMethod === "上下滚动2") {
+    normalized.readMethod = "上下滚动";
+  }
+  return normalized;
+};
+
 export default new Vuex.Store({
   state: {
     connected: false,
@@ -177,6 +187,7 @@ export default new Vuex.Store({
       state.readingBook = {};
     },
     setConfig(state, config) {
+      config = normalizeReadMethod(config);
       delete config.name;
       delete config.configDefaultType;
       if (

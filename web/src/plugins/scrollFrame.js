@@ -1,28 +1,20 @@
-// Unified scroll coordinate access for the reader.
-//
-// The reader historically read/wrote `document.scrollingElement` (the root
-// scroller). Keeping all scroll math behind this frame makes it possible to
-// later move scrolling into a dedicated container without changing the
-// business logic that computes anchors and positions.
+// Single root-page scroll coordinate access for the reader. Keeping all reads
+// and writes behind this frame prevents individual reader modes from creating
+// their own competing scroll containers.
 export class ScrollFrame {
   constructor() {
-    this.el = null;
-    this.lastViewportHeight = 0;
-    this.lastScrollHeight = 0;
+    this.bound = false;
   }
 
-  // Bind an explicit scroller when the reader is hosted inside one; otherwise
-  // fall back to the document root scroller.
-  bind(el) {
-    this.el = el || null;
-    this.lastViewportHeight = 0;
-    this.lastScrollHeight = 0;
+  // Kept as a lifecycle hook for Reader. The argument is intentionally
+  // ignored: the project has one supported vertical scroller, the document.
+  bind() {
+    this.bound = true;
     return this;
   }
 
   getElement() {
     return (
-      this.el ||
       document.scrollingElement ||
       document.documentElement ||
       document.body ||
@@ -45,36 +37,18 @@ export class ScrollFrame {
 
   getScrollHeight() {
     const el = this.getElement();
-    const height = el ? el.scrollHeight : 0;
-    if (height > 0) {
-      this.lastScrollHeight = height;
-    }
-    return height > 0 ? height : this.lastScrollHeight;
+    return el ? el.scrollHeight : 0;
   }
 
   // The height of the region that is currently scrollable/visible.
   getViewportHeight() {
-    if (this.el) {
-      const height = this.el.clientHeight || 0;
-      if (height > 0) {
-        this.lastViewportHeight = height;
-      }
-      return height > 0 ? height : this.lastViewportHeight;
-    }
-    if (window.visualViewport && window.visualViewport.height) {
-      return window.visualViewport.height;
-    }
+    // For the document scroller use the layout viewport. The visual viewport
+    // changes while Safari's toolbar animates and must not alter page scroll
+    // calculations or trigger a second application correction.
     return window.innerHeight || 0;
   }
 
   getViewportTop() {
-    if (this.el) {
-      const rect = this.el.getBoundingClientRect();
-      return rect.top;
-    }
-    if (window.visualViewport && window.visualViewport.offsetTop) {
-      return window.visualViewport.offsetTop;
-    }
     return 0;
   }
 
@@ -85,7 +59,7 @@ export class ScrollFrame {
     if (!element) {
       return 0;
     }
-    return element.getBoundingClientRect().top - this.getViewportTop();
+    return element.getBoundingClientRect().top;
   }
 
   getMaxScrollTop() {

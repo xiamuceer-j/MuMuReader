@@ -332,9 +332,6 @@
               "
               >{{ method }}</span
             >
-            <span class="small-tip"
-              >❗️上下滚动2会自动隐藏看过的章节，但是可能会抖动</span
-            >
           </div>
         </li>
         <li>
@@ -495,7 +492,7 @@ export default {
         { src: "bg/边彩画布.jpg" }
       ],
       fonts: ["系统", "黑体", "楷体", "宋体", "仿宋"],
-      readMethods: ["上下滑动", "左右滑动", "上下滚动", "上下滚动2"],
+      readMethods: ["上下滑动", "左右滑动", "上下滚动"],
       clickMethods: ["下一页", "自动", "不翻页"],
       selectionActions: ["操作弹窗", "忽略"],
       pageModes: ["自适应", "手机模式"],

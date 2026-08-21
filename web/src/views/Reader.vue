@@ -2,8 +2,7 @@
   <div class="chapter-wrapper" :style="bodyTheme" :class="{
     night: isNight,
     day: !isNight,
-    'mini-interface': $store.state.miniInterface,
-    'scroll-read-mode': useScrollContainer
+    'mini-interface': $store.state.miniInterface
   }" ref="chapterWrapperRef">
     <div class="tool-bar" :style="leftBarTheme">
       <div class="tools">
@@ -442,21 +441,12 @@ export default {
       });
     },
     isScrollRead(val) {
-      this.bindScrollFrame();
       if (val) {
         this.scrollStartChapterIndex = this.chapterIndex;
         this.computeShowChapterList();
       }
     },
-    miniInterface() {
-      this.$nextTick(() => this.bindScrollFrame());
-    },
     windowSize() {
-      // 在移动端滚动模式下，地址栏显示/隐藏会导致 innerHeight 变化
-      // 但我们使用固定的 --vh 变量，所以不需要重新计算页面
-      if (this.isScrollRead && this.$store.state.miniInterface) {
-        return;
-      }
       this.$nextTick(() => {
         this.computePages(() => {
           this.showPage(this.currentPage, 0);
@@ -560,15 +550,11 @@ export default {
 
       autoReading: false,
       showChapterList: [],
-      scrollTarget: null,
       readerScrolling: false,
       pendingChapterCommit: null,
-      lastNonZeroScrollTop: 0,
-      pendingViewportRestoreTop: null,
 
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
-      showPrevChapterSize: 0,
 
       speechMinutes: 0,
       speechEndTime: 0
@@ -622,8 +608,7 @@ export default {
         !this.isEpub &&
         !this.isAudio &&
         !this.isSlideRead &&
-        (this.config.readMethod === "上下滚动" ||
-          this.config.readMethod === "上下滚动2")
+        this.config.readMethod === "上下滚动"
       );
     },
     shouldHideMobileScrollBar() {
@@ -631,9 +616,6 @@ export default {
     },
     miniInterface() {
       return this.$store.state.miniInterface;
-    },
-    useScrollContainer() {
-      return this.isScrollRead && this.$store.state.miniInterface;
     },
     chapterClass() {
       return this.isSlideRead
@@ -906,28 +888,13 @@ export default {
           (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
       );
     },
-    getScrollTarget() {
-      return this.useScrollContainer ? this.$refs.content || null : null;
-    },
     bindScrollFrame() {
       this.unbindScrollFrame();
-      this.lastNonZeroScrollTop = 0;
-      this.pendingViewportRestoreTop = null;
-      const target = this.getScrollTarget();
-      this.scrollTarget = target || null;
-      scrollFrame.bind(target || null);
-      if (target) {
-        target.addEventListener("scroll", this.scrollHandler);
-      } else {
-        window.addEventListener("scroll", this.scrollHandler);
-      }
+      scrollFrame.bind(null);
+      window.addEventListener("scroll", this.scrollHandler);
     },
     unbindScrollFrame() {
-      if (this.scrollTarget) {
-        this.scrollTarget.removeEventListener("scroll", this.scrollHandler);
-      }
       window.removeEventListener("scroll", this.scrollHandler);
-      this.scrollTarget = null;
       scrollFrame.bind(null);
     },
     init(refresh) {
@@ -960,7 +927,6 @@ export default {
       } else {
         if (this.isScrollRead) {
           this.scrollStartChapterIndex = this.chapterIndex;
-          this.showPrevChapterSize = 0;
           this.computeShowChapterList().then(() => {
             this.autoShowPosition(true);
           });
@@ -1236,10 +1202,7 @@ export default {
         this.chapterContentCache.chapters[index] &&
         !this.chapterContentCache.chapters[index].error
       ) {
-        if (
-          index >= this.chapterIndex - this.showPrevChapterSize &&
-          index <= this.chapterIndex + this.showNextChapterSize
-        ) {
+        if (index <= this.chapterIndex + this.showNextChapterSize) {
           this.computeShowChapterList();
         }
         return Promise.resolve();
@@ -1333,9 +1296,6 @@ export default {
       if (typeof startIndex !== "number") {
         startIndex = this.chapterIndex;
       }
-      if (this.config.readMethod === "上下滚动2") {
-        startIndex = this.chapterIndex - this.showPrevChapterSize;
-      }
       const waitPromise = [];
       for (
         let i = startIndex;
@@ -1371,11 +1331,6 @@ export default {
       }
       const scrollAnchor =
         !reset && needRestore ? this.captureScrollAnchor() : null;
-      const shouldRestoreFromCache =
-        !reset &&
-        needRestore &&
-        !scrollAnchor &&
-        this.config.readMethod === "上下滚动2";
       this.saveReadingPosition();
       // 暂停记录位置
       this.startSavePosition = false;
@@ -1393,8 +1348,6 @@ export default {
               // 切换上下章节，滚动到顶部
               this.toTop(0);
               this.startSavePosition = true;
-            } else if (shouldRestoreFromCache) {
-              this.autoShowPosition(true);
             } else {
               this.startSavePosition = true;
             }
@@ -2517,39 +2470,6 @@ export default {
       const scrollTop = this.getScrollTop();
       this.readerScrolling = true;
       const viewportHeight = this.getReaderViewportHeight();
-      // WebKit can transiently reset a nested scroller to zero while the
-      // browser toolbar is being restored. Treat only a large discontinuity
-      // as a viewport reset; ordinary user scrolling to the real top remains
-      // untouched because the preceding value will be near the viewport edge.
-      if (
-        viewportController.isTransitioning &&
-        scrollTop === 0 &&
-        this.lastNonZeroScrollTop > viewportHeight
-      ) {
-        this.pendingViewportRestoreTop = this.lastNonZeroScrollTop;
-        viewportController.onceSettled(
-          () => {
-            const restoreTop = this.pendingViewportRestoreTop;
-            this.pendingViewportRestoreTop = null;
-            const maxScrollTop = scrollFrame.getMaxScrollTop();
-            if (
-              restoreTop > 0 &&
-              this.getScrollTop() === 0 &&
-              maxScrollTop !== null &&
-              maxScrollTop >= restoreTop
-            ) {
-              scrollFrame.setScrollTop(restoreTop);
-            }
-          },
-          "reader-viewport-scroll-reset"
-        );
-        return;
-      }
-      if (scrollTop > 0) {
-        this.lastNonZeroScrollTop = scrollTop;
-      } else if (!viewportController.isTransitioning) {
-        this.lastNonZeroScrollTop = 0;
-      }
       if (!this.isSlideRead) {
         this.currentPage = Math.round(
           (scrollTop + viewportHeight) /
@@ -2557,22 +2477,7 @@ export default {
         );
       }
       if (this.isScrollRead) {
-        const lastScrollTop = this.lastScrollTop || 0;
-        if (lastScrollTop > 0 && scrollTop == 0) {
-          // 往上滚动到顶
-          // if (!this.preCaching) {
-          //   this.preCaching = true;
-          //   const prevIndex = this.showChapterList[0].index - 1;
-          //   if (prevIndex > 0) {
-          //     this.showPrevChapterSize = this.chapterIndex - prevIndex;
-          //     this.loadShowChapter(prevIndex).then(() => {
-          //       setTimeout(() => {
-          //         this.preCaching = false;
-          //       }, 3000);
-          //     });
-          //   }
-          // }
-        } else if (
+        if (
           scrollTop >
           scrollFrame.getScrollHeight() -
           4 * viewportHeight // 倒数第四页
@@ -2598,7 +2503,6 @@ export default {
           }
         }
       }
-      this.lastScrollTop = scrollTop;
       this.scrollTimer && clearTimeout(this.scrollTimer);
       this.scrollTimer = setTimeout(() => {
         this.readerScrolling = false;
@@ -3761,7 +3665,7 @@ export default {
 .chapter-wrapper.mini-interface {
   padding: 0;
   position: relative;
-  height: 100%;
+  height: auto;
 
   .tool-bar {
     left: 0;
@@ -3925,39 +3829,6 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
-  height 100%
-  overflow hidden
-
-body.mobile-scroll-read .book-content
-  overflow-anchor none
-
-body.mobile-scroll-read #app
-  height 100%
-  overflow hidden
-
-.chapter-wrapper.mini-interface.scroll-read-mode
-  position absolute
-  top 0
-  right 0
-  bottom 0
-  left 0
-  width 100%
-  height calc(var(--vh, 1vh) * 100)
-  overflow hidden
-
-.chapter-wrapper.mini-interface.scroll-read-mode .chapter
-  position absolute
-  top 0
-  left 0
-  right 0
-  bottom 0
-  height auto
-  min-height 0
-  overflow-y auto
-  overflow-anchor none
-  touch-action pan-y
-  -webkit-overflow-scrolling touch
-  overscroll-behavior contain
 
 body.mobile-scroll-read::-webkit-scrollbar,
 html.mobile-scroll-read::-webkit-scrollbar
