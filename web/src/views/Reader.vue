@@ -236,6 +236,13 @@
             @iframeLoad="$emit('iframeLoad')" @contentChange="computePages()" @epubClick="eventHandler"
             @epubLocationChange="epubLocationChangeHandler" @epubClickHash="epubClickHash"
             @epubKeydown="keydownHandler($event, true)" />
+          <div v-if="isScrollRead" ref="chapterEndSentinel" class="chapter-end-sentinel">
+            <span v-if="nextChapterLoading">正在加载下一章...</span>
+            <button v-else-if="nextChapterLoadError" type="button" @click.stop="retryLoadNextChapter">
+              加载下一章失败，点击重试
+            </button>
+            <span v-else-if="!hasNextChapter">已是最后一章</span>
+          </div>
         </div>
       </div>
       <div class="bottom-bar" ref="bottom">
@@ -302,6 +309,7 @@ export default {
       }
       if (this.isScrollRead) {
         this.scrollStartChapterIndex = data.chapterIndex;
+        this.scrollEndChapterIndex = data.chapterIndex;
         this.computeShowChapterList().then(() => {
           this.showMatchKeyword(data);
         });
@@ -323,6 +331,7 @@ export default {
       }
       if (this.isScrollRead) {
         this.scrollStartChapterIndex = bookmark.chapterIndex;
+        this.scrollEndChapterIndex = bookmark.chapterIndex;
         this.computeShowChapterList().then(() => {
           this.showBookmark(bookmark);
         });
@@ -352,6 +361,10 @@ export default {
       () => {
         this.$nextTick(() => {
           this.computePages(() => {
+            if (this.isScrollRead) {
+              this.scheduleChapterEndCheck();
+              return;
+            }
             if (this.currentPage > this.totalPages) {
               this.showPage(this.totalPages, 0);
             }
@@ -364,6 +377,7 @@ export default {
     );
     this.bindScrollFrame();
     viewportController.bind();
+    this.$nextTick(() => this.setupChapterEndObserver());
     try {
       this.releaseWakeLockFn = this.wakeLock();
     } catch (e) {
@@ -382,12 +396,14 @@ export default {
       window.removeEventListener("keydown", this.keydownHandler);
       this.unbindScrollFrame();
       viewportController.unbind();
+      this.disconnectChapterEndObserver();
       this.unwatchFn && this.unwatchFn();
       this.releaseWakeLockFn && this.releaseWakeLockFn();
       this.$Lazyload.$off("loaded", this.lazyloadHandler);
       this.setMobileScrollBarHidden(false);
     },
     beforeDestroy() {
+      this.disconnectChapterEndObserver();
       this.setMobileScrollBarHidden(false);
     },
   watch: {
@@ -443,12 +459,22 @@ export default {
     isScrollRead(val) {
       if (val) {
         this.scrollStartChapterIndex = this.chapterIndex;
-        this.computeShowChapterList();
+        this.scrollEndChapterIndex = this.chapterIndex;
+        this.nextChapterLoadError = "";
+        this.computeShowChapterList().then(() => {
+          this.scheduleChapterEndCheck();
+        });
+      } else {
+        this.disconnectChapterEndObserver();
       }
     },
     windowSize() {
       this.$nextTick(() => {
         this.computePages(() => {
+          if (this.isScrollRead) {
+            this.scheduleChapterEndCheck();
+            return;
+          }
           this.showPage(this.currentPage, 0);
         });
       });
@@ -554,7 +580,11 @@ export default {
       pendingChapterCommit: null,
 
       scrollStartChapterIndex: 0,
-      showNextChapterSize: 1,
+      scrollEndChapterIndex: 0,
+      nextChapterLoading: false,
+      nextChapterLoadError: "",
+      chapterEndObserver: null,
+      chapterEndCheckTimer: null,
 
       speechMinutes: 0,
       speechEndTime: 0
@@ -610,6 +640,15 @@ export default {
         !this.isSlideRead &&
         this.config.readMethod === "上下滚动"
       );
+    },
+    hasNextChapter() {
+      if (!this.catalog.length) {
+        return false;
+      }
+      const lastChapter = this.showChapterList.length
+        ? this.showChapterList[this.showChapterList.length - 1].index
+        : this.chapterIndex;
+      return lastChapter < this.catalog.length - 1;
     },
     shouldHideMobileScrollBar() {
       return this.isScrollRead && this.$store.state.miniInterface;
@@ -897,6 +936,128 @@ export default {
       window.removeEventListener("scroll", this.scrollHandler);
       scrollFrame.bind(null);
     },
+    setupChapterEndObserver() {
+      if (!this.isScrollRead || !this.$refs.chapterEndSentinel) {
+        this.disconnectChapterEndObserver();
+        return;
+      }
+      if (this.chapterEndObserver) {
+        this.chapterEndObserver.disconnect();
+        this.chapterEndObserver = null;
+      }
+      if ("IntersectionObserver" in window) {
+        this.chapterEndObserver = new IntersectionObserver(
+          entries => {
+            if (entries.some(entry => entry.isIntersecting)) {
+              this.ensureNextChapterLoaded();
+            }
+          },
+          {
+            root: null,
+            // Start fetching before the end marker becomes visible. This also
+            // fills short chapters until the document is actually scrollable.
+            rootMargin: "0px 0px 200% 0px",
+            threshold: 0
+          }
+        );
+        this.chapterEndObserver.observe(this.$refs.chapterEndSentinel);
+      }
+    },
+    disconnectChapterEndObserver() {
+      if (this.chapterEndObserver) {
+        this.chapterEndObserver.disconnect();
+        this.chapterEndObserver = null;
+      }
+      if (this.chapterEndCheckTimer) {
+        clearTimeout(this.chapterEndCheckTimer);
+        this.chapterEndCheckTimer = null;
+      }
+    },
+    scheduleChapterEndCheck() {
+      if (!this.isScrollRead) {
+        return;
+      }
+      if (this.chapterEndCheckTimer) {
+        clearTimeout(this.chapterEndCheckTimer);
+      }
+      this.$nextTick(() => {
+        this.chapterEndCheckTimer = setTimeout(() => {
+          this.chapterEndCheckTimer = null;
+          this.setupChapterEndObserver();
+          this.checkChapterEndProximity();
+        }, 0);
+      });
+    },
+    checkChapterEndProximity() {
+      if (
+        !this.isScrollRead ||
+        !this.hasNextChapter ||
+        this.nextChapterLoading ||
+        this.nextChapterLoadError ||
+        !this.$refs.chapterEndSentinel
+      ) {
+        return;
+      }
+      const rect = this.$refs.chapterEndSentinel.getBoundingClientRect();
+      const viewportHeight = this.getReaderViewportHeight();
+      if (rect.top <= viewportHeight * 3 && rect.bottom >= -viewportHeight) {
+        this.ensureNextChapterLoaded();
+      }
+    },
+    ensureNextChapterLoaded() {
+      if (
+        !this.isScrollRead ||
+        this.nextChapterLoading ||
+        this.nextChapterLoadError ||
+        !this.catalog.length
+      ) {
+        return Promise.resolve(false);
+      }
+      const lastIndex = this.showChapterList.length
+        ? this.showChapterList[this.showChapterList.length - 1].index
+        : this.chapterIndex;
+      const nextIndex = lastIndex + 1;
+      if (nextIndex >= this.catalog.length) {
+        return Promise.resolve(false);
+      }
+
+      this.nextChapterLoading = true;
+      this.scrollEndChapterIndex = Math.max(
+        this.scrollEndChapterIndex,
+        nextIndex
+      );
+      return this.loadShowChapter(nextIndex)
+        .then(() => {
+          const chapter =
+            this.chapterContentCache &&
+            this.chapterContentCache.chapters[nextIndex];
+          if (!chapter || chapter.error) {
+            throw new Error("章节内容获取失败");
+          }
+          return this.computeShowChapterList();
+        })
+        .then(() => {
+          this.nextChapterLoading = false;
+          this.scheduleChapterEndCheck();
+          return true;
+        })
+        .catch(error => {
+          // Keep already rendered chapters intact. A failed future chapter
+          // must not blank the reader or trap it without a retry action.
+          this.scrollEndChapterIndex = Math.max(
+            this.scrollStartChapterIndex,
+            nextIndex - 1
+          );
+          this.nextChapterLoading = false;
+          this.nextChapterLoadError =
+            (error && (error.message || error.toString())) || "加载失败";
+          return false;
+        });
+    },
+    retryLoadNextChapter() {
+      this.nextChapterLoadError = "";
+      this.ensureNextChapterLoaded();
+    },
     init(refresh) {
       if (!this.readingRecentReady) {
         return;
@@ -927,6 +1088,8 @@ export default {
       } else {
         if (this.isScrollRead) {
           this.scrollStartChapterIndex = this.chapterIndex;
+          this.scrollEndChapterIndex = this.chapterIndex;
+          this.nextChapterLoadError = "";
           this.computeShowChapterList().then(() => {
             this.autoShowPosition(true);
           });
@@ -1075,7 +1238,11 @@ export default {
       this.title = chapterName;
       const now = new Date().getTime();
       if (this.isScrollRead) {
-        this.scrollStartChapterIndex = chapterIndex;
+        // The rendered list is indexed by the catalog position. chapterIndex
+        // is the backend content index and is not guaranteed to be the same.
+        this.scrollStartChapterIndex = index;
+        this.scrollEndChapterIndex = index;
+        this.nextChapterLoadError = "";
       }
       this.getBookContent(chapterIndex, {}, refresh).then(
         res => {
@@ -1202,9 +1369,6 @@ export default {
         this.chapterContentCache.chapters[index] &&
         !this.chapterContentCache.chapters[index].error
       ) {
-        if (index <= this.chapterIndex + this.showNextChapterSize) {
-          this.computeShowChapterList();
-        }
         return Promise.resolve();
       }
       let bookUrl = this.$store.getters.readingBook.bookUrl;
@@ -1296,12 +1460,13 @@ export default {
       if (typeof startIndex !== "number") {
         startIndex = this.chapterIndex;
       }
+      let endIndex = this.scrollEndChapterIndex;
+      if (typeof endIndex !== "number" || endIndex < startIndex) {
+        endIndex = startIndex;
+      }
+      endIndex = Math.min(endIndex, this.catalog.length - 1);
       const waitPromise = [];
-      for (
-        let i = startIndex;
-        i <= this.chapterIndex + this.showNextChapterSize;
-        i++
-      ) {
+      for (let i = startIndex; i <= endIndex; i++) {
         if (!this.chapterContentCache.chapters[i]) {
           waitPromise.push(this.loadShowChapter(i));
           continue;
@@ -1351,6 +1516,7 @@ export default {
             } else {
               this.startSavePosition = true;
             }
+            this.scheduleChapterEndCheck();
             resolve();
           });
         });
@@ -1401,6 +1567,8 @@ export default {
       ) {
         if (this.isScrollRead) {
           this.scrollStartChapterIndex = index;
+          this.scrollEndChapterIndex = index;
+          this.nextChapterLoadError = "";
           this.computeShowChapterList(true);
           return;
         }
@@ -1426,6 +1594,8 @@ export default {
       ) {
         if (this.isScrollRead) {
           this.scrollStartChapterIndex = index;
+          this.scrollEndChapterIndex = index;
+          this.nextChapterLoadError = "";
           this.computeShowChapterList(true);
           return;
         }
@@ -2477,31 +2647,9 @@ export default {
         );
       }
       if (this.isScrollRead) {
-        if (
-          scrollTop >
-          scrollFrame.getScrollHeight() -
-          4 * viewportHeight // 倒数第四页
-        ) {
-          // 往下滚动到 倒数第三页
-          if (!this.preCaching && this.startSavePosition) {
-            this.preCaching = true;
-            let nextIndex = this.chapterIndex + 1;
-            if (this.showChapterList.length) {
-              nextIndex =
-                this.showChapterList[this.showChapterList.length - 1].index + 1;
-            }
-            this.showNextChapterSize = nextIndex - this.chapterIndex;
-            // console.log("到底部了，加载下一章");
-            this.loadShowChapter(nextIndex)
-              .then(() => {
-                this.computeShowChapterList();
-                this.preCaching = false;
-              })
-              .catch(() => {
-                this.preCaching = false;
-              });
-          }
-        }
+        // IntersectionObserver is the primary trigger. Keep this geometry
+        // check as a fallback for older WebViews and iOS delivery edge cases.
+        this.checkChapterEndProximity();
       }
       this.scrollTimer && clearTimeout(this.scrollTimer);
       this.scrollTimer = setTimeout(() => {
@@ -2509,6 +2657,7 @@ export default {
         const settle = () => {
           this.flushPendingChapterCommit().then(() => {
             this.saveReadingPosition();
+            this.checkChapterEndProximity();
           });
         };
         if (viewportController.isTransitioning) {
@@ -3473,6 +3622,26 @@ export default {
         min-height: calc(var(--vh, 1vh) * 80);
         padding-bottom: 25px;
         box-sizing: border-box;
+      }
+
+      .chapter-end-sentinel {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 0 24px;
+        box-sizing: border-box;
+        font-size: 13px;
+        color: #999;
+
+        button {
+          border: 0;
+          padding: 8px 12px;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          cursor: pointer;
+        }
       }
     }
 
