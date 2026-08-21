@@ -563,6 +563,8 @@ export default {
       scrollTarget: null,
       readerScrolling: false,
       pendingChapterCommit: null,
+      lastNonZeroScrollTop: 0,
+      pendingViewportRestoreTop: null,
 
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
@@ -909,6 +911,8 @@ export default {
     },
     bindScrollFrame() {
       this.unbindScrollFrame();
+      this.lastNonZeroScrollTop = 0;
+      this.pendingViewportRestoreTop = null;
       const target = this.getScrollTarget();
       this.scrollTarget = target || null;
       scrollFrame.bind(target || null);
@@ -2478,8 +2482,15 @@ export default {
       const newViewportOffset = scrollFrame.viewportOffset(paragraph);
       const rawDelta = newViewportOffset - anchor.viewportOffset;
       const currentScroll = scrollFrame.getScrollTop();
+      const maxScrollTop = scrollFrame.getMaxScrollTop();
+      // During Safari toolbar restoration a fixed/overflow layer can report
+      // a transient zero or incomplete height. Never clamp a valid position
+      // to the top using those transient metrics.
+      if (maxScrollTop === null || (currentScroll > 0 && maxScrollTop === 0)) {
+        return;
+      }
       const targetScroll = Math.min(
-        scrollFrame.getMaxScrollTop(),
+        maxScrollTop,
         Math.max(0, currentScroll + rawDelta)
       );
       const adjustment = targetScroll - currentScroll;
@@ -2506,6 +2517,39 @@ export default {
       const scrollTop = this.getScrollTop();
       this.readerScrolling = true;
       const viewportHeight = this.getReaderViewportHeight();
+      // WebKit can transiently reset a nested scroller to zero while the
+      // browser toolbar is being restored. Treat only a large discontinuity
+      // as a viewport reset; ordinary user scrolling to the real top remains
+      // untouched because the preceding value will be near the viewport edge.
+      if (
+        viewportController.isTransitioning &&
+        scrollTop === 0 &&
+        this.lastNonZeroScrollTop > viewportHeight
+      ) {
+        this.pendingViewportRestoreTop = this.lastNonZeroScrollTop;
+        viewportController.onceSettled(
+          () => {
+            const restoreTop = this.pendingViewportRestoreTop;
+            this.pendingViewportRestoreTop = null;
+            const maxScrollTop = scrollFrame.getMaxScrollTop();
+            if (
+              restoreTop > 0 &&
+              this.getScrollTop() === 0 &&
+              maxScrollTop !== null &&
+              maxScrollTop >= restoreTop
+            ) {
+              scrollFrame.setScrollTop(restoreTop);
+            }
+          },
+          "reader-viewport-scroll-reset"
+        );
+        return;
+      }
+      if (scrollTop > 0) {
+        this.lastNonZeroScrollTop = scrollTop;
+      } else if (!viewportController.isTransitioning) {
+        this.lastNonZeroScrollTop = 0;
+      }
       if (!this.isSlideRead) {
         this.currentPage = Math.round(
           (scrollTop + viewportHeight) /
@@ -3892,14 +3936,13 @@ body.mobile-scroll-read #app
   overflow hidden
 
 .chapter-wrapper.mini-interface.scroll-read-mode
-  position fixed
+  position absolute
   top 0
   right 0
   bottom 0
   left 0
   width 100%
   height calc(var(--vh, 1vh) * 100)
-  height 100lvh
   overflow hidden
 
 .chapter-wrapper.mini-interface.scroll-read-mode .chapter

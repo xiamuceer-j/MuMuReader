@@ -7,12 +7,16 @@
 export class ScrollFrame {
   constructor() {
     this.el = null;
+    this.lastViewportHeight = 0;
+    this.lastScrollHeight = 0;
   }
 
   // Bind an explicit scroller when the reader is hosted inside one; otherwise
   // fall back to the document root scroller.
   bind(el) {
     this.el = el || null;
+    this.lastViewportHeight = 0;
+    this.lastScrollHeight = 0;
     return this;
   }
 
@@ -33,20 +37,29 @@ export class ScrollFrame {
 
   setScrollTop(top) {
     const el = this.getElement();
-    if (el) {
-      el.scrollTop = top;
+    if (!el || !Number.isFinite(top)) {
+      return;
     }
+    el.scrollTop = Math.max(0, top);
   }
 
   getScrollHeight() {
     const el = this.getElement();
-    return el ? el.scrollHeight : 0;
+    const height = el ? el.scrollHeight : 0;
+    if (height > 0) {
+      this.lastScrollHeight = height;
+    }
+    return height > 0 ? height : this.lastScrollHeight;
   }
 
   // The height of the region that is currently scrollable/visible.
   getViewportHeight() {
     if (this.el) {
-      return this.el.clientHeight || 0;
+      const height = this.el.clientHeight || 0;
+      if (height > 0) {
+        this.lastViewportHeight = height;
+      }
+      return height > 0 ? height : this.lastViewportHeight;
     }
     if (window.visualViewport && window.visualViewport.height) {
       return window.visualViewport.height;
@@ -76,7 +89,12 @@ export class ScrollFrame {
   }
 
   getMaxScrollTop() {
-    return Math.max(0, this.getScrollHeight() - this.getViewportHeight());
+    const scrollHeight = this.getScrollHeight();
+    const viewportHeight = this.getViewportHeight();
+    if (!scrollHeight || !viewportHeight) {
+      return null;
+    }
+    return Math.max(0, scrollHeight - viewportHeight);
   }
 }
 
