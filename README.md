@@ -1,75 +1,61 @@
-# reader
+# MuMuReader
 
-阅读3服务器版，不需要手机。
+阅读 3 服务器版，一个自托管的网页阅读器，无需安装手机 App。
 
-加入TG群(限时开放) 👉 [https://t.me/+pQ8HDlANPZ84ZWNl](https://t.me/+pQ8HDlANPZ84ZWNl)
+MuMuReader 兼容「阅读 3.0 / Legado」的书源规则，在浏览器中提供书架管理、在线搜索、章节阅读、换源、本地书籍导入、RSS 订阅与多用户等能力，适合部署在个人服务器或 NAS 上自用。
 
-关注公众号，查看教程和书源👇
+## 功能特性
 
-![](imgs/mpcode.png)
+- 书源管理与失效检测
+- 书架、书籍分组与阅读进度同步
+- 在线搜索与书海浏览
+- 换源、并发搜书
+- 多种翻页方式与手势支持
+- 自定义主题、样式与文字替换过滤
+- 本地 TXT / EPUB / UMD / PDF 导入
+- WebDAV 同步与用户配置备份恢复
+- RSS 订阅与定时更新书架
+- 漫画、音频与听书（听书受浏览器限制）
+- 多用户与权限管理
+- 移动端适配与 PWA
+- Kindle 阅读支持
 
+## 技术栈
 
-> 注意❗️
->
-> Reader 完整源码当前版本为 v2.6.0，新版本当前仅开放部分开源源码，见 https://github.com/hectorqin/reader-legado.
+- 后端：Kotlin + Spring Boot + Vert.x，复用阅读 3.0 书源规则引擎
+- 前端：Vue 2 + Vuex + Element UI（PWA）
+- 桌面端：JavaFX（可选）
+- 数据存储：文件存储，默认位于 `storage/` 目录
 
-<details><summary>免责声明（Disclaimer）</summary>
-阅读是一款提供网络文学搜索的工具，为广大网络文学爱好者提供一种方便、快捷舒适的试读体验。
+## 快速开始
 
-当您搜索一本书的时，阅读会将该书的书名以关键词的形式提交到各个第三方网络文学网站。各第三方网站返回的内容与阅读无关，阅读对其概不负责，亦不承担任何法律责任。任何通过使用阅读而链接到的第三方网页均系他人制作或提供，您可能从第三方网页上获得其他服务，阅读对其合法性概不负责，亦不承担任何法律责任。第三方搜索引擎结果根据您提交的书名自动搜索获得并提供试读，不代表阅读赞成或被搜索链接到的第三方网页上的内容或立场。您应该对使用搜索引擎的结果自行承担风险。
+使用 Docker Compose（推荐）：
 
-阅读不做任何形式的保证：不保证第三方搜索引擎的搜索结果满足您的要求，不保证搜索服务不中断，不保证搜索结果的安全性、正确性、及时性、合法性。因网络状况、通讯线路、第三方网站等任何原因而导致您不能正常使用阅读，阅读不承担任何法律责任。阅读尊重并保护所有使用阅读用户的个人隐私权，您注册的用户名、电子邮件地址等个人资料，非经您亲自许可或根据相关法律、法规的强制性规定，阅读不会主动地泄露给第三方。
+```bash
+cp .env.example .env
+# 编辑 .env，设置 READER_APP_SECUREKEY 管理密码等
+docker compose up -d
+```
 
-阅读致力于最大程度地减少网络文学阅读者在自行搜寻过程中的无意义的时间浪费，通过专业搜索展示不同网站中网络文学的最新章节。阅读在为广大小说爱好者提供方便、快捷舒适的试读体验的同时，也使优秀网络文学得以迅速、更广泛的传播，从而达到了在一定程度促进网络文学充分繁荣发展之目的。阅读鼓励广大小说爱好者通过阅读发现优秀网络小说及其提供商，并建议阅读正版图书。任何单位或个人认为通过阅读搜索链接到的第三方网页内容可能涉嫌侵犯其信息网络传播权，应该及时向阅读提出书面权力通知，并提供身份证明、权属证明及详细侵权情况证明。阅读在收到上述法律文件后，将会依法尽快断开相关链接内容。
-</details>
+访问 `http://localhost:4396`。
 
-<details><summary>功能说明</summary>
-  书源管理 <br/>
-- 书架管理 <br/>
-- 书架布局 <br/>
-- 搜索 <br/>
-- 书海 <br/>
-- 看书 <br/>
-- 移动端适配 <br/>
-- 换源 <br/>
-- 翻页方式 <br/>
-- 手势支持 <br/>
-- 自定义主题 <br/>
-- 自定义样式 <br/>
-- WebDAV同步 <br/>
-- 文字替换过滤 <br/>
-- 听书<仅部分浏览器支持，手机端会因为锁屏而失效> <br/>
-- 用户配置备份恢复 <br/>
-- 支持漫画 <br/>
-- 支持音频 <br/>
-- 书源失效检测 <br/>
-- 导入本地TXT、EPUB、UMD、PDF格式的书籍 <br/>
-- 书籍分组 <br/>
-- RSS订阅 <br/>
-- 定时更新书架 <br/>
-- 并发搜书 <br/>
-- 本地书仓 <br/>
-- 支持kindle阅读 <br/>
-</details>
+更多安装方式（服务器 JAR、桌面端、源码编译、Nginx 反向代理等）请查看 [doc.md](doc.md)。
 
-## 下载与安装
+## 已知限制
 
-详见[文档](https://github.com/xiamuceer-j/MuMuReader/blob/master/doc.md)
-
-## 问题
-
-- 部分使用了 `Javascript` 的书源可能会报错，如调用原生java等高级Javascript功能
-- `webview` 功能需要另外部署接口，不支持 `sourceRegex` 匹配资源响应
+- 部分使用 `Javascript` 的书源可能报错，例如调用原生 Java 等高级功能
+- `webview` 功能需要另外部署远程接口，且不支持 `sourceRegex` 匹配资源响应
 - 不支持书源登录功能
 
-## 感谢
+## 文档
 
-- 项目初期参考了 [lightink-小说API](https://github.com/lightink-qingmo/lightink-server)
-- [阅读](https://github.com/gedoor/MyBookshelf)
-- [阅读3.0](https://github.com/gedoor/legado)
-- 项目初期参考了 [阅读3.0Web端](https://github.com/celetor/web-yuedu3)
+- [使用与部署文档](doc.md)
+- [界面预览](preview.md)
 
-## 其它
+## 免责声明
 
-- [帮助文档](https://github.com/xiamuceer-j/MuMuReader/blob/master/doc.md)
-- [界面预览](https://github.com/xiamuceer-j/MuMuReader/blob/master/preview.md)
+本工具仅用于技术学习与个人试读，搜索与阅读内容均来自第三方网站，与 MuMuReader 无关。请尊重版权，支持正版。
+
+## 许可证
+
+[GPL-3.0](LICENSE)
