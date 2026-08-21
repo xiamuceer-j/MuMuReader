@@ -2,7 +2,8 @@
   <div class="chapter-wrapper" :style="bodyTheme" :class="{
     night: isNight,
     day: !isNight,
-    'mini-interface': $store.state.miniInterface
+    'mini-interface': $store.state.miniInterface,
+    'scroll-read-mode': useScrollContainer
   }" ref="chapterWrapperRef">
     <div class="tool-bar" :style="leftBarTheme">
       <div class="tools">
@@ -267,6 +268,8 @@ import {
   editDistance
 } from "../plugins/helper";
 import { defaultReplaceRule, defaultBookmark } from "../plugins/config.js";
+import { scrollFrame } from "../plugins/scrollFrame";
+import { viewportController } from "../plugins/viewportController";
 import eventBus from "../plugins/eventBus";
 // eslint-disable-next-line no-useless-escape
 const symboRegex = /[\u2000-\u206F\u2E00-\u2E7F\\'!"#$%&\(\)*+,-\./:;<=>?@\[\]^_`{\|}~，。？《》；：、«]/g;
@@ -360,7 +363,8 @@ export default {
         deep: true
       }
     );
-    window.addEventListener("scroll", this.scrollHandler);
+    this.bindScrollFrame();
+    viewportController.bind();
     try {
       this.releaseWakeLockFn = this.wakeLock();
     } catch (e) {
@@ -377,7 +381,8 @@ export default {
       this.scrollTimer && clearTimeout(this.scrollTimer);
       this.scrollTimer = null;
       window.removeEventListener("keydown", this.keydownHandler);
-      window.removeEventListener("scroll", this.scrollHandler);
+      this.unbindScrollFrame();
+      viewportController.unbind();
       this.unwatchFn && this.unwatchFn();
       this.releaseWakeLockFn && this.releaseWakeLockFn();
       this.$Lazyload.$off("loaded", this.lazyloadHandler);
@@ -437,10 +442,14 @@ export default {
       });
     },
     isScrollRead(val) {
+      this.bindScrollFrame();
       if (val) {
         this.scrollStartChapterIndex = this.chapterIndex;
         this.computeShowChapterList();
       }
+    },
+    miniInterface() {
+      this.$nextTick(() => this.bindScrollFrame());
     },
     windowSize() {
       // 在移动端滚动模式下，地址栏显示/隐藏会导致 innerHeight 变化
@@ -551,6 +560,7 @@ export default {
 
       autoReading: false,
       showChapterList: [],
+      scrollTarget: null,
 
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
@@ -613,6 +623,12 @@ export default {
       );
     },
     shouldHideMobileScrollBar() {
+      return this.isScrollRead && this.$store.state.miniInterface;
+    },
+    miniInterface() {
+      return this.$store.state.miniInterface;
+    },
+    useScrollContainer() {
       return this.isScrollRead && this.$store.state.miniInterface;
     },
     chapterClass() {
@@ -885,6 +901,28 @@ export default {
         (/iP(hone|ad|od)/.test(navigator.userAgent) ||
           (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
       );
+    },
+    getScrollTarget() {
+      return this.useScrollContainer ? this.$refs.content || null : null;
+    },
+    bindScrollFrame() {
+      this.unbindScrollFrame();
+      const target = this.getScrollTarget();
+      this.scrollTarget = target || null;
+      scrollFrame.bind(target || null);
+      if (target) {
+        target.addEventListener("scroll", this.scrollHandler);
+      } else {
+        window.addEventListener("scroll", this.scrollHandler);
+      }
+    },
+    unbindScrollFrame() {
+      if (this.scrollTarget) {
+        this.scrollTarget.removeEventListener("scroll", this.scrollHandler);
+      }
+      window.removeEventListener("scroll", this.scrollHandler);
+      this.scrollTarget = null;
+      scrollFrame.bind(null);
     },
     init(refresh) {
       if (!this.readingRecentReady) {
@@ -1374,7 +1412,14 @@ export default {
       }
     },
     toBottom(interval) {
-      jump(this.$refs.bottom, { duration: interval });
+      const container = scrollFrame.getElement();
+      const isCustomContainer =
+        container && container !== window && container !== document.scrollingElement;
+      if (isCustomContainer) {
+        jump(this.$refs.bottom, { duration: interval, container });
+      } else {
+        jump(this.$refs.bottom, { duration: interval });
+      }
     },
     toNextChapter(onError) {
       if (
@@ -1484,9 +1529,9 @@ export default {
         }
       } else {
         if (
-          (document.documentElement.scrollTop || document.body.scrollTop) +
+          scrollFrame.getScrollTop() +
           this.windowSize.height <
-          document.documentElement.scrollHeight
+          scrollFrame.getScrollHeight()
         ) {
           this.currentPage += 1;
           const moveY = this.windowSize.height - this.scrollOffset;
@@ -1528,7 +1573,7 @@ export default {
         }
       } else {
         if (
-          (document.documentElement.scrollTop || document.body.scrollTop) > 0
+          scrollFrame.getScrollTop() > 0
         ) {
           this.currentPage -= 1;
           const moveY = -this.windowSize.height + this.scrollOffset;
@@ -1556,7 +1601,7 @@ export default {
       } else {
         const moveY =
           (this.windowSize.height - 10) * (this.currentPage - 1) -
-          (document.documentElement.scrollTop || document.body.scrollTop);
+          scrollFrame.getScrollTop();
         this.scrollContent(
           moveY,
           typeof duration === "undefined" ? this.animateMSTime : duration
@@ -1596,13 +1641,7 @@ export default {
       // console.log("scrollContent", moveY);
       const lastScrollTop = isAccurate ? 0 : this.getScrollTop();
       const setScrollTop = top => {
-        const scrollElement =
-          document.scrollingElement ||
-          document.documentElement ||
-          document.body;
-        if (scrollElement) {
-          scrollElement.scrollTop = top;
-        }
+        scrollFrame.setScrollTop(top);
       };
       const onEnd = () => {
         setScrollTop(lastScrollTop + moveY);
@@ -1784,7 +1823,7 @@ export default {
         point.clientY =
           point.clientY +
           45 -
-          (document.documentElement.scrollTop || document.body.scrollTop);
+          scrollFrame.getScrollTop();
       }
       if (
         Math.abs(point.clientY - midY) <= this.windowSize.height * 0.2 &&
@@ -2352,12 +2391,10 @@ export default {
       };
     },
     getScrollAnchorDocumentTop(element) {
-      return element.getBoundingClientRect().top + this.getScrollTop();
+      return scrollFrame.documentTop(element);
     },
     getScrollTop() {
-      const scrollElement =
-        document.scrollingElement || document.documentElement || document.body;
-      return scrollElement ? scrollElement.scrollTop : 0;
+      return scrollFrame.getScrollTop();
     },
     restoreScrollAnchor(anchor) {
       if (
@@ -2366,6 +2403,12 @@ export default {
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
+        return;
+      }
+      // Safari may still be animating its address bar. Deferring here avoids
+      // racing the browser's own viewport compensation.
+      if (viewportController.isTransitioning) {
+        viewportController.onceSettled(() => this.restoreScrollAnchor(anchor));
         return;
       }
       const container = this.$refs.bookContentRef.$el;
@@ -2383,11 +2426,7 @@ export default {
       }
       const newDocumentTop = this.getScrollAnchorDocumentTop(paragraph);
       const rawDelta = newDocumentTop - anchor.documentTop;
-      const scrollElement =
-        document.scrollingElement ||
-        document.documentElement ||
-        document.body;
-      const currentScroll = scrollElement.scrollTop || 0;
+      const currentScroll = scrollFrame.getScrollTop();
       // Let the browser clamp the upper bound; only guard the lower bound.
       const targetScroll = Math.max(0, currentScroll + rawDelta);
       const adjustment = targetScroll - currentScroll;
@@ -2435,7 +2474,7 @@ export default {
           // }
         } else if (
           scrollTop >
-          (document.scrollingElement || document.documentElement).scrollHeight -
+          scrollFrame.getScrollHeight() -
           4 * this.windowSize.height // 倒数第四页
         ) {
           // 往下滚动到 倒数第三页
@@ -2461,7 +2500,13 @@ export default {
       }
       this.lastScrollTop = scrollTop;
       this.scrollTimer && clearTimeout(this.scrollTimer);
-      this.scrollTimer = setTimeout(this.saveReadingPosition, 100);
+      this.scrollTimer = setTimeout(() => {
+        if (viewportController.isTransitioning) {
+          viewportController.onceSettled(() => this.saveReadingPosition());
+        } else {
+          this.saveReadingPosition();
+        }
+      }, 100);
     },
     beforeReadMethodChange() {
       this.currentParagraph = this.getCurrentParagraph();
@@ -2520,8 +2565,7 @@ export default {
             ? this.$refs.bookContentRef.currentTime
             : 0;
         } else if (this.isEpub || this.isCarToon) {
-          position =
-            document.documentElement.scrollTop || document.body.scrollTop;
+          position = scrollFrame.getScrollTop();
         } else {
           // 更新当前章节 和 当前段落
           if (this.preCaching) {
@@ -2831,10 +2875,10 @@ export default {
         return;
       }
       const scrollTop =
-        document.documentElement.scrollTop || document.body.scrollTop;
+        scrollFrame.getScrollTop();
       if (
         scrollTop + this.windowSize.height <
-        document.documentElement.scrollHeight
+        scrollFrame.getScrollHeight()
       ) {
         // console.log(delayTime, next);
         this.autoReadingTimer = setTimeout(() => {
@@ -3769,10 +3813,22 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
-  overflow-anchor none
 
 body.mobile-scroll-read .book-content
-  overflow-anchor none
+  overflow-anchor auto
+
+.chapter-wrapper.mini-interface.scroll-read-mode .chapter
+  position fixed
+  top 0
+  left 0
+  right 0
+  bottom 0
+  height 100vh
+  height 100dvh
+  min-height 0
+  overflow-y auto
+  -webkit-overflow-scrolling touch
+  overscroll-behavior contain
 
 body.mobile-scroll-read::-webkit-scrollbar,
 html.mobile-scroll-read::-webkit-scrollbar

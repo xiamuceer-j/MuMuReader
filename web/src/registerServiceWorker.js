@@ -2,53 +2,73 @@
 
 import { register } from "register-service-worker";
 
+let refreshing = false;
+
+function handleControllerChange() {
+  if (refreshing) {
+    return;
+  }
+  refreshing = true;
+  window.location.reload();
+}
+
+function skipWaiting(registration) {
+  const worker = registration && registration.waiting;
+  if (worker) {
+    worker.postMessage({ type: "SKIP_WAITING" });
+  }
+}
+
 export function registerServiceWorker() {
   try {
     if (
       process.env.NODE_ENV === "production" &&
       !window.getQueryString("nopwa")
     ) {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          handleControllerChange
+        );
+      }
       register(`${process.env.BASE_URL}service-worker.js`, {
         ready() {
-          // console.log(
-          //   "App is being served from cache by a service worker.\n" +
-          //     "For more details, visit https://goo.gl/AFskqB"
-          // );
           window.serviceWorkerReady = true;
         },
         registered(registration) {
-          // console.log("Service worker has been registered.");
           if (window.localStorage) {
             const currentVersion = window.localStorage.getItem(
               "READER_APP_BUILD_VERSION"
             );
             const newVersion = process.env.VUE_APP_BUILD_VERSION;
             if (currentVersion !== newVersion) {
-              registration.active.postMessage({ type: "SKIP_WAITING" });
+              skipWaiting(registration);
               window.localStorage.setItem(
                 "READER_APP_BUILD_VERSION",
                 newVersion
               );
             }
           }
+        },
+        updatefound(registration) {
+          const worker = registration.waiting || registration.installing;
+          if (!worker) {
+            return;
+          }
+          const activate = () => {
+            if (
+              worker.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              worker.postMessage({ type: "SKIP_WAITING" });
+            }
+          };
+          if (worker.state === "installed") {
+            activate();
+          } else {
+            worker.addEventListener("statechange", activate);
+          }
         }
-        // cached() {
-        //   console.log("Content has been cached for offline use.");
-        // },
-        // updatefound() {
-        //   console.log("New content is downloading.");
-        // },
-        // updated() {
-        //   console.log("New content is available; please refresh.");
-        // },
-        // offline() {
-        //   console.log(
-        //     "No internet connection found. App is running in offline mode."
-        //   );
-        // },
-        // error(error) {
-        //   console.error("Error during service worker registration:", error);
-        // }
       });
     }
   } catch (error) {
