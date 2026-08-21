@@ -561,6 +561,8 @@ export default {
       autoReading: false,
       showChapterList: [],
       scrollTarget: null,
+      readerScrolling: false,
+      pendingChapterCommit: null,
 
       scrollStartChapterIndex: 0,
       showNextChapterSize: 1,
@@ -1306,16 +1308,21 @@ export default {
         this.chapterContentCache.chapters[chapter.index] = chapter;
       }
     },
-    computeShowChapterList(reset) {
+    computeShowChapterList(reset, forceCommit) {
       if (!this.chapterContentCache) {
         return new Promise(resolve => {
           setTimeout(() => {
-            this.computeShowChapterList(reset).then(resolve);
+            this.computeShowChapterList(reset, forceCommit).then(resolve);
           }, 10);
         });
       }
       if (!this.isScrollRead) {
         return Promise.resolve();
+      }
+      if (reset && this.pendingChapterCommit) {
+        const pending = this.pendingChapterCommit;
+        this.pendingChapterCommit = null;
+        pending.resolvers.forEach(resolve => resolve());
       }
       const list = [];
       let startIndex = this.scrollStartChapterIndex;
@@ -1324,9 +1331,6 @@ export default {
       }
       if (this.config.readMethod === "上下滚动2") {
         startIndex = this.chapterIndex - this.showPrevChapterSize;
-        if (!reset && this.isMiniIOSReader() && this.showChapterList.length) {
-          startIndex = Math.min(startIndex, this.showChapterList[0].index);
-        }
       }
       const waitPromise = [];
       for (
@@ -1346,9 +1350,9 @@ export default {
         });
       }
       if (waitPromise.length) {
-        return Promise.all(waitPromise).then(() => {
-          this.computeShowChapterList(reset);
-        });
+        return Promise.all(waitPromise).then(() =>
+          this.computeShowChapterList(reset, forceCommit)
+        );
       }
       let needRestore = true;
       if (
@@ -1357,6 +1361,9 @@ export default {
         this.showChapterList[0].index === list[0].index
       ) {
         needRestore = false;
+      }
+      if (!forceCommit && !reset && needRestore && this.shouldDeferChapterCommit()) {
+        return this.queueChapterCommit(reset);
       }
       const scrollAnchor =
         !reset && needRestore ? this.captureScrollAnchor() : null;
@@ -1370,8 +1377,12 @@ export default {
       this.startSavePosition = false;
       // 记录当前章节
       this.showChapterList = list;
-      this.$nextTick(() => {
-        const afterLayout = () => {
+      return new Promise(resolve => {
+        this.$nextTick(() => {
+          // Keep the DOM replacement and the compensating scroll write in the
+          // same render turn. Waiting for requestAnimationFrame lets Safari
+          // paint its native anchor correction first, which creates a second
+          // visible jump.
           this.restoreScrollAnchor(scrollAnchor);
           this.computePages(() => {
             if (reset) {
@@ -1383,13 +1394,9 @@ export default {
             } else {
               this.startSavePosition = true;
             }
+            resolve();
           });
-        };
-        if (window.requestAnimationFrame) {
-          window.requestAnimationFrame(afterLayout);
-        } else {
-          afterLayout();
-        }
+        });
       });
     },
     saveBookProgress(index) {
@@ -1474,6 +1481,48 @@ export default {
     toShelf() {
       this.$router.push("/");
     },
+    shouldDeferChapterCommit() {
+      return this.readerScrolling || viewportController.isTransitioning;
+    },
+    queueChapterCommit(reset) {
+      return new Promise(resolve => {
+        if (!this.pendingChapterCommit) {
+          this.pendingChapterCommit = {
+            reset: !!reset,
+            resolvers: []
+          };
+        } else {
+          this.pendingChapterCommit.reset =
+            this.pendingChapterCommit.reset || !!reset;
+        }
+        this.pendingChapterCommit.resolvers.push(resolve);
+        if (viewportController.isTransitioning) {
+          viewportController.onceSettled(
+            () => this.flushPendingChapterCommit(),
+            "reader-chapter-commit"
+          );
+        }
+      });
+    },
+    flushPendingChapterCommit() {
+      if (!this.pendingChapterCommit || this.shouldDeferChapterCommit()) {
+        if (
+          this.pendingChapterCommit &&
+          viewportController.isTransitioning
+        ) {
+          viewportController.onceSettled(
+            () => this.flushPendingChapterCommit(),
+            "reader-chapter-commit"
+          );
+        }
+        return Promise.resolve();
+      }
+      const pending = this.pendingChapterCommit;
+      this.pendingChapterCommit = null;
+      return this.computeShowChapterList(pending.reset, true).then(() => {
+        pending.resolvers.forEach(resolve => resolve());
+      });
+    },
     computePages(cb) {
       if (!this.$refs.bookContentRef || !this.$refs.bookContentRef.$el) {
         setTimeout(() => {
@@ -1489,7 +1538,7 @@ export default {
       } else {
         this.totalPages = Math.ceil(
           this.$refs.bookContentRef.$el.scrollHeight /
-          (this.windowSize.height - this.scrollOffset)
+          (this.getReaderViewportHeight() - this.scrollOffset)
         );
       }
       if (this.showLastPage) {
@@ -1528,13 +1577,14 @@ export default {
           });
         }
       } else {
+        const viewportHeight = this.getReaderViewportHeight();
         if (
           scrollFrame.getScrollTop() +
-          this.windowSize.height <
+          viewportHeight <
           scrollFrame.getScrollHeight()
         ) {
           this.currentPage += 1;
-          const moveY = this.windowSize.height - this.scrollOffset;
+          const moveY = viewportHeight - this.scrollOffset;
           this.transforming = true;
           this.scrollContent(moveY, this.animateMSTime);
         } else {
@@ -1576,7 +1626,8 @@ export default {
           scrollFrame.getScrollTop() > 0
         ) {
           this.currentPage -= 1;
-          const moveY = -this.windowSize.height + this.scrollOffset;
+          const moveY =
+            -this.getReaderViewportHeight() + this.scrollOffset;
           this.transforming = true;
           this.scrollContent(moveY, this.animateMSTime);
         } else {
@@ -1599,8 +1650,9 @@ export default {
           typeof duration === "undefined" ? this.animateMSTime : duration
         );
       } else {
+        const viewportHeight = this.getReaderViewportHeight();
         const moveY =
-          (this.windowSize.height - 10) * (this.currentPage - 1) -
+          (viewportHeight - 10) * (this.currentPage - 1) -
           scrollFrame.getScrollTop();
         this.scrollContent(
           moveY,
@@ -2274,6 +2326,11 @@ export default {
       if (!readingEle.length) {
         // 没有正在读的段落，遍历找到当前页面的第一段
         const list = this.$refs.bookContentRef.$el.querySelectorAll("h3,p");
+        const frameTop = scrollFrame.getViewportTop();
+        const topBarBottom = this.$refs.top
+          ? this.$refs.top.getBoundingClientRect().bottom
+          : frameTop;
+        const readingTop = Math.max(frameTop, topBarBottom);
         for (let i = 0; i < list.length; i++) {
           const elePos = list[i].getBoundingClientRect();
           if (this.isSlideRead) {
@@ -2286,7 +2343,7 @@ export default {
             // 段尾出现在视野里
             if (
               elePos.bottom >
-              30 +
+              readingTop +
               20 +
               (window.webAppDistance | 0) +
               (this.$store.state.safeArea.top | 0)
@@ -2387,14 +2444,14 @@ export default {
       return {
         chapterIndex: +chapter.dataset.index,
         paragraphPos: +paragraph.dataset.pos,
-        documentTop: this.getScrollAnchorDocumentTop(paragraph)
+        viewportOffset: scrollFrame.viewportOffset(paragraph)
       };
-    },
-    getScrollAnchorDocumentTop(element) {
-      return scrollFrame.documentTop(element);
     },
     getScrollTop() {
       return scrollFrame.getScrollTop();
+    },
+    getReaderViewportHeight() {
+      return scrollFrame.getViewportHeight() || this.windowSize.height;
     },
     restoreScrollAnchor(anchor) {
       if (
@@ -2403,12 +2460,6 @@ export default {
         !this.$refs.bookContentRef ||
         !this.$refs.bookContentRef.$el
       ) {
-        return;
-      }
-      // Safari may still be animating its address bar. Deferring here avoids
-      // racing the browser's own viewport compensation.
-      if (viewportController.isTransitioning) {
-        viewportController.onceSettled(() => this.restoreScrollAnchor(anchor));
         return;
       }
       const container = this.$refs.bookContentRef.$el;
@@ -2424,15 +2475,18 @@ export default {
       if (!paragraph) {
         return;
       }
-      const newDocumentTop = this.getScrollAnchorDocumentTop(paragraph);
-      const rawDelta = newDocumentTop - anchor.documentTop;
+      const newViewportOffset = scrollFrame.viewportOffset(paragraph);
+      const rawDelta = newViewportOffset - anchor.viewportOffset;
       const currentScroll = scrollFrame.getScrollTop();
-      // Let the browser clamp the upper bound; only guard the lower bound.
-      const targetScroll = Math.max(0, currentScroll + rawDelta);
+      const targetScroll = Math.min(
+        scrollFrame.getMaxScrollTop(),
+        Math.max(0, currentScroll + rawDelta)
+      );
       const adjustment = targetScroll - currentScroll;
       if (Math.abs(adjustment) > 1) {
-        // Keep the paragraph the user is reading at the same viewport offset.
-        this.scrollContent(adjustment, 0);
+        // Keep the paragraph at the same offset inside the active scroller.
+        // This write is deliberately synchronous with the Vue DOM patch.
+        scrollFrame.setScrollTop(targetScroll);
       }
     },
     findChapterElement(node) {
@@ -2450,10 +2504,12 @@ export default {
     },
     scrollHandler() {
       const scrollTop = this.getScrollTop();
+      this.readerScrolling = true;
+      const viewportHeight = this.getReaderViewportHeight();
       if (!this.isSlideRead) {
         this.currentPage = Math.round(
-          (scrollTop + this.windowSize.height) /
-          (this.windowSize.height - this.scrollOffset)
+          (scrollTop + viewportHeight) /
+          (viewportHeight - this.scrollOffset)
         );
       }
       if (this.isScrollRead) {
@@ -2475,7 +2531,7 @@ export default {
         } else if (
           scrollTop >
           scrollFrame.getScrollHeight() -
-          4 * this.windowSize.height // 倒数第四页
+          4 * viewportHeight // 倒数第四页
         ) {
           // 往下滚动到 倒数第三页
           if (!this.preCaching && this.startSavePosition) {
@@ -2501,12 +2557,18 @@ export default {
       this.lastScrollTop = scrollTop;
       this.scrollTimer && clearTimeout(this.scrollTimer);
       this.scrollTimer = setTimeout(() => {
+        this.readerScrolling = false;
+        const settle = () => {
+          this.flushPendingChapterCommit().then(() => {
+            this.saveReadingPosition();
+          });
+        };
         if (viewportController.isTransitioning) {
-          viewportController.onceSettled(() => this.saveReadingPosition());
+          viewportController.onceSettled(settle, "reader-scroll-settle");
         } else {
-          this.saveReadingPosition();
+          settle();
         }
-      }, 100);
+      }, 140);
     },
     beforeReadMethodChange() {
       this.currentParagraph = this.getCurrentParagraph();
@@ -2877,7 +2939,7 @@ export default {
       const scrollTop =
         scrollFrame.getScrollTop();
       if (
-        scrollTop + this.windowSize.height <
+        scrollTop + this.getReaderViewportHeight() <
         scrollFrame.getScrollHeight()
       ) {
         // console.log(delayTime, next);
@@ -2984,6 +3046,12 @@ export default {
       // 获取视口内的所有段落
       const list = this.$refs.bookContentRef.$el.querySelectorAll("h3,p");
       const paragraphList = [];
+      const frameTop = scrollFrame.getViewportTop();
+      const topBarBottom = this.$refs.top
+        ? this.$refs.top.getBoundingClientRect().bottom
+        : frameTop;
+      const readingTop = Math.max(frameTop, topBarBottom);
+      const readingBottom = frameTop + this.getReaderViewportHeight();
       for (let i = 0; i < list.length; i++) {
         const elePos = list[i].getBoundingClientRect();
         if (this.isSlideRead) {
@@ -2995,11 +3063,11 @@ export default {
           // 段尾出现在视野里
           if (
             elePos.bottom >
-            30 +
+            readingTop +
             20 +
             (window.webAppDistance | 0) +
             (this.$store.state.safeArea.top | 0) &&
-            elePos.bottom < this.windowSize.height
+            elePos.bottom < readingBottom
           ) {
             paragraphList.push(list[i]);
           }
@@ -3813,20 +3881,38 @@ body.mobile-scroll-read,
 html.mobile-scroll-read
   -ms-overflow-style none
   scrollbar-width none
+  height 100%
+  overflow hidden
 
 body.mobile-scroll-read .book-content
-  overflow-anchor auto
+  overflow-anchor none
+
+body.mobile-scroll-read #app
+  height 100%
+  overflow hidden
+
+.chapter-wrapper.mini-interface.scroll-read-mode
+  position fixed
+  top 0
+  right 0
+  bottom 0
+  left 0
+  width 100%
+  height calc(var(--vh, 1vh) * 100)
+  height 100lvh
+  overflow hidden
 
 .chapter-wrapper.mini-interface.scroll-read-mode .chapter
-  position fixed
+  position absolute
   top 0
   left 0
   right 0
   bottom 0
-  height 100vh
-  height 100dvh
+  height auto
   min-height 0
   overflow-y auto
+  overflow-anchor none
+  touch-action pan-y
   -webkit-overflow-scrolling touch
   overscroll-behavior contain
 

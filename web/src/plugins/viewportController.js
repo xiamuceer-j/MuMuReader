@@ -6,7 +6,8 @@ export class ViewportController {
   constructor() {
     this.state = "idle";
     this.timer = null;
-    this.pending = [];
+    this.pending = new Map();
+    this.bound = false;
     this.handleChange = this.handleChange.bind(this);
   }
 
@@ -22,8 +23,8 @@ export class ViewportController {
     this.timer = setTimeout(() => {
       this.timer = null;
       this.state = "settled";
-      const callbacks = this.pending;
-      this.pending = [];
+      const callbacks = Array.from(this.pending.values());
+      this.pending.clear();
       callbacks.forEach(fn => {
         try {
           fn();
@@ -34,23 +35,29 @@ export class ViewportController {
     }, 300);
   }
 
-  // Run `fn` now when the viewport is already stable, otherwise queue it until
-  // the transition has settled. Returns an unsubscribe function.
-  onceSettled(fn) {
+  // Run `fn` now when the viewport is already stable, otherwise queue the
+  // latest callback for `key` until the transition has settled. A keyed queue
+  // prevents stale anchor/progress callbacks from accumulating during a fast
+  // Safari toolbar transition.
+  onceSettled(fn, key) {
     if (!this.isTransitioning) {
       fn();
       return () => {};
     }
-    this.pending.push(fn);
+    const pendingKey = key || fn;
+    this.pending.set(pendingKey, fn);
     return () => {
-      const index = this.pending.indexOf(fn);
-      if (index >= 0) {
-        this.pending.splice(index, 1);
+      if (this.pending.get(pendingKey) === fn) {
+        this.pending.delete(pendingKey);
       }
     };
   }
 
   bind() {
+    if (this.bound) {
+      return;
+    }
+    this.bound = true;
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", this.handleChange);
       window.visualViewport.addEventListener("scroll", this.handleChange);
@@ -58,6 +65,10 @@ export class ViewportController {
   }
 
   unbind() {
+    if (!this.bound) {
+      return;
+    }
+    this.bound = false;
     if (window.visualViewport) {
       window.visualViewport.removeEventListener("resize", this.handleChange);
       window.visualViewport.removeEventListener("scroll", this.handleChange);
@@ -66,7 +77,7 @@ export class ViewportController {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    this.pending = [];
+    this.pending.clear();
     this.state = "idle";
   }
 }

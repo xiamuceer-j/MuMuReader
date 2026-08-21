@@ -54,14 +54,29 @@ export class ScrollFrame {
     return window.innerHeight || 0;
   }
 
-  // Document-relative top of an element. This stays stable across Safari
-  // address-bar transitions because it is `rect.top + scrollTop`, not the raw
-  // viewport-relative `rect.top` alone.
-  documentTop(element) {
+  getViewportTop() {
+    if (this.el) {
+      const rect = this.el.getBoundingClientRect();
+      return rect.top;
+    }
+    if (window.visualViewport && window.visualViewport.offsetTop) {
+      return window.visualViewport.offsetTop;
+    }
+    return 0;
+  }
+
+  // Return an element's position inside the active scroll frame. Unlike a
+  // document coordinate, this remains valid when Safari moves the visual
+  // viewport or the scroll frame is nested inside another element.
+  viewportOffset(element) {
     if (!element) {
       return 0;
     }
-    return element.getBoundingClientRect().top + this.getScrollTop();
+    return element.getBoundingClientRect().top - this.getViewportTop();
+  }
+
+  getMaxScrollTop() {
+    return Math.max(0, this.getScrollHeight() - this.getViewportHeight());
   }
 }
 
